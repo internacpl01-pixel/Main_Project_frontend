@@ -1,0 +1,327 @@
+import { api } from './apiClient.js'
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export async function login(username, password) {
+  const params = new URLSearchParams()
+  params.append('username', username)
+  params.append('password', password)
+  const { data } = await api.post('/auth/login', params)
+  return data
+}
+
+export async function logout() {
+  await api.post('/auth/logout')
+}
+
+export async function getMe() {
+  const { data } = await api.get('/auth/me')
+  return data
+}
+
+export async function switchCompany(schemaName) {
+  // The backend declares Body(..., embed=True) on `schema_name`, so the key
+  // must be schema_name. Sending `schema` returned 422 every time.
+  const { data } = await api.post('/auth/switch-company', { schema_name: schemaName })
+  return data
+}
+
+// ── Companies (super-admin only) ─────────────────────────────────────────────
+
+export async function fetchCompanies(includeInactive = false) {
+  const { data } = await api.get('/companies/', {
+    params: includeInactive ? { include_inactive: true } : {},
+  })
+  return data
+}
+
+export async function registerCompany(payload) {
+  // payload: { name, admin_username?, admin_password? }
+  // Returns { company, admin } — admin is null when no first admin was seeded.
+  const { data } = await api.post('/companies/', payload)
+  return data
+}
+
+export async function updateCompany(companyId, payload) {
+  // payload: { name?, is_active? }
+  const { data } = await api.patch(`/companies/${companyId}`, payload)
+  return data
+}
+
+// ── Users (manager and above, scoped to the current company) ─────────────────
+
+export async function fetchUsers() {
+  const { data } = await api.get('/users/')
+  return data
+}
+
+export async function createUser(payload) {
+  // payload: { username, password, role }
+  const { data } = await api.post('/users/', payload)
+  return data
+}
+
+export async function updateUser(userId, payload) {
+  // payload: { username?, password? }
+  const { data } = await api.patch(`/users/${userId}`, payload)
+  return data
+}
+
+export async function updateUserRole(userId, role) {
+  // The backend declares Body(..., embed=True) on `role`, so it must be an
+  // object, not a bare string.
+  const { data } = await api.put(`/users/${userId}/role`, { role })
+  return data
+}
+
+export async function deleteUser(userId) {
+  const { data } = await api.delete(`/users/${userId}`)
+  return data
+}
+
+// ── Project assignment ───────────────────────────────────────────────────────
+
+export async function fetchUserProjects(userId) {
+  // Returns every active project flagged with whether this user is on it,
+  // plus sees_all_projects for admin accounts that need no assignment.
+  const { data } = await api.get(`/users/${userId}/projects`)
+  return data
+}
+
+export async function setUserProjects(userId, projectIds) {
+  // The complete set, not a delta — see PUT /users/{id}/projects.
+  const { data } = await api.put(`/users/${userId}/projects`, { project_ids: projectIds })
+  return data
+}
+
+export async function fetchProjectMembers(projectId) {
+  const { data } = await api.get(`/projects/${projectId}/members`)
+  return data
+}
+
+// ── Projects ─────────────────────────────────────────────────────────────────
+
+export async function fetchProjects() {
+  const { data } = await api.get('/projects/')
+  return data
+}
+
+export async function createProject(payload) {
+  const { data } = await api.post('/projects/', payload)
+  return data
+}
+
+export async function updateProject(projectId, payload) {
+  const { data } = await api.patch(`/projects/${projectId}`, payload)
+  return data
+}
+
+export async function deleteProject(projectId) {
+  const { data } = await api.delete(`/projects/${projectId}`)
+  return data
+}
+
+// ── Custom Fields (FieldMap) ──────────────────────────────────────────────────
+// Aliases: fetchFieldMap, createFieldMapEntry, updateFieldMapEntry, deleteFieldMapEntry
+// Page alias names: fetchFieldMappings, createFieldMapping, updateFieldMapping, deleteFieldMapping
+
+export async function fetchFieldMap() {
+  const { data } = await api.get('/fieldmap/')
+  return data
+}
+export const fetchFieldMappings = fetchFieldMap
+
+export async function createFieldMapEntry(payload) {
+  const { data } = await api.post('/fieldmap/', payload)
+  return data
+}
+export const createFieldMapping = createFieldMapEntry
+
+export async function updateFieldMapEntry(fieldmapId, payload) {
+  const { data } = await api.patch(`/fieldmap/${fieldmapId}`, payload)
+  return data
+}
+export const updateFieldMapping = updateFieldMapEntry
+
+export async function deleteFieldMapEntry(fieldmapId) {
+  const { data } = await api.delete(`/fieldmap/${fieldmapId}`)
+  return data
+}
+export const deleteFieldMapping = deleteFieldMapEntry
+
+// Audit trail of every fieldmap edit. Manager+; staff get a 403.
+// Returns { rows, total, page, limit, offset }.
+export async function fetchFieldChangeLog(params = {}) {
+  const { data } = await api.get('/fieldmap/change-log', { params })
+  return data
+}
+
+// ── Custom Fields ────────────────────────────────────────────────────────────
+// These add and drop real columns on temp_trans. /fieldmap above only edits how
+// an existing column is recognised — it never changes the table.
+
+export async function fetchCustomFields() {
+  const { data } = await api.get('/custom-fields/')
+  return data
+}
+
+export async function createCustomField(type, displayname = '', mapfields = '', method = '') {
+  // The column name is generated server-side (field_num_1, ...) because it is
+  // interpolated into ALTER TABLE. Only the label is yours to choose.
+  const { data } = await api.post('/custom-fields/', { type, displayname, mapfields, method })
+  return data
+}
+
+export async function deleteCustomField(fieldname) {
+  const { data } = await api.delete(`/custom-fields/${encodeURIComponent(fieldname)}`)
+  return data
+}
+
+export async function fetchTableStructure() {
+  const { data } = await api.get('/custom-fields/table-structure')
+  return data
+}
+
+// ── Master Data ──────────────────────────────────────────────────────────────
+
+export async function fetchMasterSchema() {
+  // What master tables exist and what their columns are called. The Master Data
+  // page builds its tabs and forms from this rather than from a second copy of
+  // the backend's _TABLES config.
+  const { data } = await api.get('/master/_schema')
+  return data
+}
+
+export async function fetchMasterData(masterType, params = {}) {
+  const { data } = await api.get(`/master/${masterType}`, { params })
+  return data
+}
+
+export async function createMasterEntry(masterType, payload) {
+  const { data } = await api.post(`/master/${masterType}`, payload)
+  return data
+}
+
+export async function updateMasterEntry(masterType, itemId, payload) {
+  const { data } = await api.patch(`/master/${masterType}/${itemId}`, payload)
+  return data
+}
+
+export async function deleteMasterEntry(masterType, itemId) {
+  const { data } = await api.delete(`/master/${masterType}/${itemId}`)
+  return data
+}
+
+// ── Transactions (ledger) ────────────────────────────────────────────────────
+
+// Paged. Returns { columns, rows, total, page, limit } — `total` is the count
+// matching the filters, `rows` is one page of it. Anything totalling the ledger
+// must read `total`, not rows.length.
+export async function fetchTransactions(params = {}) {
+  const { data } = await api.get('/transactions/', { params })
+  return data
+}
+
+// Alias used by Dashboard and Export pages
+export const fetchSummary = () => fetchTransactionSummary()
+
+export async function fetchTransactionSummary() {
+  const { data } = await api.get('/transactions/summary')
+  return data
+}
+
+// Paged. Returns { columns, rows, summary, total, page, limit }.
+// `total` follows the tab and search filters; `summary` deliberately does not —
+// it is what the Clear button reports, which is everything staged.
+export async function fetchTempImport(params = {}) {
+  const { data } = await api.get('/transactions/temp-trans', { params })
+  return data
+}
+
+// Remove one staged row. Manager+. 409 if it has already been posted.
+export async function deleteTempRow(rowId) {
+  const { data } = await api.delete(`/transactions/temp-trans/${rowId}`)
+  return data
+}
+
+export async function clearTempTrans() {
+  // Removes every staged row and its batch. Refused with 409 if any staged row
+  // has already been posted to the ledger.
+  const { data } = await api.delete('/transactions/temp-trans')
+  return data
+}
+
+export async function classifyRow(rowId, payload) {
+  const { data } = await api.post(`/transactions/temp-trans/${rowId}/classify`, payload)
+  return data
+}
+
+export async function finalizeRow(rowId) {
+  const { data } = await api.post(`/transactions/temp-trans/${rowId}/finalize`)
+  return data
+}
+
+// ── Import / Upload ──────────────────────────────────────────────────────────
+
+export async function importPdf(file, save = false, bankId = null, password = '') {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('save', String(save))
+  if (bankId) form.append('bank_id', String(bankId))
+  // Bank statements are routinely emailed password-protected. The backend has
+  // always accepted this field; without it an encrypted PDF fails with
+  // "ENCRYPTED: This PDF is password-protected" and there was no way to answer.
+  if (password) form.append('password', password)
+  const { data } = await api.post('/imports/pdf', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export async function importExcel(file, save = false, bankId = null) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('save', String(save))
+  if (bankId) form.append('bank_id', String(bankId))
+  const { data } = await api.post('/imports/excel', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export async function importCsv(file, save = false, bankId = null) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('save', String(save))
+  if (bankId) form.append('bank_id', String(bankId))
+  const { data } = await api.post('/imports/csv', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export async function fetchBatches(statusFilter = null) {
+  const params = statusFilter ? { status: statusFilter } : {}
+  const { data } = await api.get('/imports/batches', { params })
+  return data
+}
+
+export async function fetchBatch(batchId) {
+  const { data } = await api.get(`/imports/batches/${batchId}`)
+  return data
+}
+
+export async function discardBatch(batchId) {
+  const { data } = await api.delete(`/imports/batches/${batchId}`)
+  return data
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+
+export async function exportTransactions(format = 'csv', params = {}) {
+  const { data } = await api.get('/export/transactions', {
+    params: { format, ...params },
+    responseType: 'blob',
+  })
+  return data
+}
