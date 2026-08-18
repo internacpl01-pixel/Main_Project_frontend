@@ -1,0 +1,22 @@
+# What NOT to upload to Vercel.
+#
+# The root .gitignore covers `git push` deploys. This file covers the other
+# route: `vercel deploy` from the CLI uploads the directory as it sits on disk,
+# and without this it would ship 117 MB of node_modules built on Windows —
+# where the executable bit does not survive — giving the build host a vite it
+# cannot run:
+#     sh: node_modules/.bin/vite: Permission denied
+#     Error: Command "npm run build" exited with 126
+#
+# Vercel installs its own dependencies from package-lock.json, so none of this
+# is needed up there.
+
+node_modules
+dist
+.vite
+.vercel
+
+# Secrets. Set VITE_API_BASE_URL in Vercel's Environment Variables instead —
+# Vite inlines it at build time, so it has to exist on the build host, not here.
+.env
+.env.*
