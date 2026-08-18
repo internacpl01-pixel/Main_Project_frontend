@@ -348,7 +348,11 @@ export default function StagingPage() {
                     These are the user's own display names, and CSS-uppercasing
                     them means every spelling renders identically — renaming a
                     field to "date" still showed "DATE", which read as the edit
-                    not saving at all. Shown exactly as typed. */}
+                    not saving at all. Shown exactly as typed.
+
+                    `|| c.name` is DPL's guard (data.js:148). Every header comes
+                    from the fieldmap; a column with no mapping falls back to its
+                    own name rather than rendering an empty cell. */}
                 {columns.map((c) => (
                   <th
                     key={c.name}
@@ -357,7 +361,7 @@ export default function StagingPage() {
                       isNumeric(c) ? 'text-right' : 'text-left'
                     }`}
                   >
-                    {c.displayname}
+                    {c.displayname || c.name}
                   </th>
                 ))}
                 <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Classification</th>
