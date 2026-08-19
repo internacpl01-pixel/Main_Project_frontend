@@ -12,6 +12,10 @@ const emptyForm = {
   name: '',
   source: 'blank',      // 'blank' | 'copy'
   copy_from_id: '',
+  // null until a preview arrives and fills it in. null and [] mean different
+  // things on the wire: null omits copy_parts and the server copies everything,
+  // [] is an explicit "nothing". Never collapse the two.
+  copy_parts: null,
   admin_username: '',
   admin_password: '',
 }
@@ -51,6 +55,27 @@ export default function CompaniesPage() {
   const copyable = items.filter((c) => c.is_active)
   const copySource = copyable.find((c) => String(c.id) === String(form.copy_from_id))
 
+  // The checkbox list is whatever the server said is copyable, never a list
+  // kept here — a master table added on the backend shows up on its own.
+  // Something the source has none of is shown greyed rather than hidden, so
+  // "no banks were copied" reads as a fact about the source instead of a
+  // missing option.
+  const selectedParts = form.copy_parts || []
+  const selectable = (preview?.parts || []).filter((p) => p.count > 0).map((p) => p.key)
+  const allSelected = selectable.length > 0 && selectable.every((k) => selectedParts.includes(k))
+
+  const togglePart = (key) =>
+    setForm((f) => {
+      const cur = f.copy_parts || []
+      return {
+        ...f,
+        copy_parts: cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
+      }
+    })
+
+  const toggleAllParts = () =>
+    setForm((f) => ({ ...f, copy_parts: allSelected ? [] : selectable }))
+
   useEffect(() => {
     load()
   }, [showInactive])
@@ -66,7 +91,17 @@ export default function CompaniesPage() {
     let cancelled = false
     setPreviewLoading(true)
     fetchClonePreview(form.copy_from_id)
-      .then((p) => { if (!cancelled) setPreview(p) })
+      .then((p) => {
+        if (cancelled) return
+        setPreview(p)
+        // Everything the source actually has, ticked. Copying all of it is what
+        // someone picking "copy an existing company" asked for; the checkboxes
+        // are there to take things away, not to make them opt in one at a time.
+        setForm((f) => ({
+          ...f,
+          copy_parts: p.parts.filter((x) => x.count > 0).map((x) => x.key),
+        }))
+      })
       .catch(() => { if (!cancelled) setPreview(null) })
       .finally(() => { if (!cancelled) setPreviewLoading(false) })
     return () => { cancelled = true }
@@ -123,7 +158,14 @@ export default function CompaniesPage() {
     setSaving(true)
     try {
       const payload = { name: form.name.trim() }
-      if (wantsCopy) payload.copy_from_id = Number(form.copy_from_id)
+      if (wantsCopy) {
+        payload.copy_from_id = Number(form.copy_from_id)
+        // Only when the user has actually seen the choices. If the preview
+        // never loaded, copy_parts stays null and is left out, so the server
+        // copies everything — which is what "copy this company" means before
+        // anyone narrows it.
+        if (form.copy_parts !== null) payload.copy_parts = form.copy_parts
+      }
       if (wantsAdmin) {
         payload.admin_username = form.admin_username.trim()
         payload.admin_password = form.admin_password
@@ -133,9 +175,14 @@ export default function CompaniesPage() {
       // of operation people want to see confirmed in numbers.
       const parts = [`${company.name} registered as ${company.schema_name}`]
       if (copied) {
+        const bits = []
+        if (copied.fields) bits.push(`${copied.fields} fields`)
+        const records = copied.projects + copied.masters
+        if (records) bits.push(`${records} records`)
         parts.push(
-          `copied ${copied.fields} fields and ` +
-          `${copied.projects + copied.masters} records from ${copied.source_name}`
+          bits.length
+            ? `copied ${bits.join(' and ')} from ${copied.source_name}`
+            : `nothing copied from ${copied.source_name}`
         )
       }
       if (admin) parts.push(`admin '${admin.username}' created`)
@@ -383,7 +430,7 @@ export default function CompaniesPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-900">Copy an existing company</p>
                   <p className="text-xs text-slate-500">
-                    Copies field structure, labels and master data.{' '}
+                    Copies field structure, labels and master data — you pick which.{' '}
                     <span className="text-slate-700 font-medium">
                       Does not copy transactions, imports or users.
                     </span>
@@ -416,19 +463,63 @@ export default function CompaniesPage() {
                 )}
 
                 {preview && !previewLoading && (
-                  <div className="mt-2 p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <p className="text-xs text-slate-700">
-                      Copies <strong>{preview.fields}</strong> fields
-                      {preview.custom_columns > 0 && <> (<strong>{preview.custom_columns}</strong> custom)</>},{' '}
-                      <strong>{preview.projects}</strong> projects and{' '}
-                      <strong>{preview.masters}</strong> master records.
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
+                  <div className="mt-2 rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200">
+                      <span className="text-xs font-medium text-slate-700">What to copy</span>
+                      <button
+                        type="button"
+                        onClick={toggleAllParts}
+                        disabled={selectable.length === 0}
+                        className="text-xs text-primary-600 hover:underline disabled:text-slate-300 disabled:no-underline"
+                      >
+                        {allSelected ? 'Clear all' : 'Select all'}
+                      </button>
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {preview.parts.map((p) => (
+                        <label
+                          key={p.key}
+                          className={`flex items-center gap-2.5 px-3 py-2 ${
+                            p.count === 0
+                              ? 'opacity-50'
+                              : 'cursor-pointer hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-300"
+                            disabled={p.count === 0}
+                            checked={selectedParts.includes(p.key)}
+                            onChange={() => togglePart(p.key)}
+                          />
+                          <span className="flex-1 text-sm text-slate-700">
+                            {p.label}
+                            {p.key === 'fields' && preview.custom_columns > 0 && (
+                              <span className="ml-1 text-xs text-slate-400">
+                                ({preview.custom_columns} custom)
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-xs text-slate-400 tabular-nums">
+                            {p.count === 0 ? 'none' : p.count}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <p className="px-3 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500">
                       No transactions, imports or accounts are copied. A copy is a
                       snapshot — changing {copySource?.name || 'the source'} later will
                       not change this company.
                     </p>
                   </div>
+                )}
+
+                {preview && !previewLoading && selectedParts.length === 0 && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Nothing ticked — this creates a blank company.
+                  </p>
                 )}
               </div>
             )}
