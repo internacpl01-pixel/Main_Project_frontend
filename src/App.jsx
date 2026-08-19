@@ -41,6 +41,19 @@ function LevelRoute({ requiredLevel, children }) {
   return hasLevel(requiredLevel) ? children : <Navigate to="/" replace />
 }
 
+/**
+ * Company pages, closed to super admins.
+ *
+ * A super admin has no company schema and the API refuses them company data
+ * outright, so these pages would render nothing but errors. Sending them to
+ * /companies is not a permission check — the server already made one — it is
+ * the difference between landing somewhere useful and staring at a 403.
+ */
+function CompanyRoute({ children }) {
+  const { isSuperAdmin } = useAuth()
+  return isSuperAdmin ? <Navigate to="/companies" replace /> : children
+}
+
 export default function App() {
   const { user, loading } = useAuth()
 
@@ -63,21 +76,21 @@ export default function App() {
           <Layout />
         </ProtectedRoute>
       }>
-        <Route index element={<DashboardPage />} />
-        <Route path="projects" element={<ProjectsPage />} />
+        <Route index element={<CompanyRoute><DashboardPage /></CompanyRoute>} />
+        <Route path="projects" element={<CompanyRoute><ProjectsPage /></CompanyRoute>} />
         {/* Two distinct jobs, not two views of one: /custom-fields creates and
             drops columns on temp_trans, /field-mapping edits how the columns
             that exist are recognised in a statement. */}
-        <Route path="custom-fields" element={<CustomFieldsPage />} />
-        <Route path="field-mapping" element={<FieldMappingPage />} />
+        <Route path="custom-fields" element={<CompanyRoute><CustomFieldsPage /></CompanyRoute>} />
+        <Route path="field-mapping" element={<CompanyRoute><FieldMappingPage /></CompanyRoute>} />
         {/* Manager+: the log names who made each change, and the API returns
             403 to staff, so an ungated route would render an error page. */}
-        <Route path="change-log" element={<LevelRoute requiredLevel={MANAGER}><ChangeLogPage /></LevelRoute>} />
-        <Route path="master-data" element={<MasterDataPage />} />
-        <Route path="import" element={<ImportPage />} />
-        <Route path="staging" element={<StagingPage />} />
-        <Route path="export" element={<ExportPage />} />
-        <Route path="users" element={<LevelRoute requiredLevel={MANAGER}><UsersPage /></LevelRoute>} />
+        <Route path="change-log" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><ChangeLogPage /></LevelRoute></CompanyRoute>} />
+        <Route path="master-data" element={<CompanyRoute><MasterDataPage /></CompanyRoute>} />
+        <Route path="import" element={<CompanyRoute><ImportPage /></CompanyRoute>} />
+        <Route path="staging" element={<CompanyRoute><StagingPage /></CompanyRoute>} />
+        <Route path="export" element={<CompanyRoute><ExportPage /></CompanyRoute>} />
+        <Route path="users" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><UsersPage /></LevelRoute></CompanyRoute>} />
         <Route path="companies" element={<LevelRoute requiredLevel={SUPER_ADMIN}><CompaniesPage /></LevelRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

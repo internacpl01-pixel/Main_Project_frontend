@@ -1,17 +1,28 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  fetchFieldMappings, createFieldMapping, updateFieldMapping, deleteFieldMapping,
+  fetchFieldMappings, updateFieldMapping, deleteFieldMapping,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, MethodInput, MethodBadge } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Plus, Pencil, Trash2, GripVertical, ChevronRight, RefreshCw } from 'lucide-react'
+import { Pencil, Trash2, GripVertical, ChevronRight, RefreshCw } from 'lucide-react'
 
-// is_active is part of the form because the importer only ever reads rows where
-// it is true (services/fieldmap.py). Turning a mapping off is how you retire a
+// This page edits mappings; it does not create them. Fields are created on the
+// Custom Fields page, which adds the real column to temp_trans and transactions
+// alongside the fieldmap row.
+//
+// The two halves have to be made together. Creating a mapping here made only
+// the fieldmap row, and a row with no column behind it still competes for a
+// statement's headers: a mapping named Debit/Credit matched the Axis header
+// "Amount(INR) Debit/Credit" more specifically than the real amount column's
+// "Credit" alias, took the column, and had nowhere to put it. Every row lost
+// its amount and the import failed with "No usable transaction rows were
+// found." Nothing about that error points back at the mapping that caused it.
+//
+// is_active stays editable here because the importer only reads rows where it
+// is true (services/fieldmap.py). Turning a mapping off is how you retire a
 // bank's spelling without deleting it and losing the alias list.
-const EMPTY_FORM = { fieldname: '', displayname: '', mapfields: '', data_type: 'text', method: '', is_active: true }
 
 export default function FieldMappingPage() {
   // Staff read this page but cannot change it — the API enforces the same
@@ -22,7 +33,9 @@ export default function FieldMappingPage() {
   const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [form, setForm] = useState({
+    fieldname: '', displayname: '', mapfields: '', data_type: 'text', method: '', is_active: true,
+  })
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
@@ -39,7 +52,6 @@ export default function FieldMappingPage() {
 
   useEffect(() => { load() }, [load])
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setModalOpen(true) }
   const openEdit = (m) => {
     setEditing(m.id)
     setForm({
@@ -54,19 +66,15 @@ export default function FieldMappingPage() {
   }
 
   const handleSave = async () => {
+    if (!editing) return
     if (!form.fieldname.trim() || !form.displayname.trim()) {
       toast.error('Field name and display name are required.')
       return
     }
     setSaving(true)
     try {
-      if (editing) {
-        await updateFieldMapping(editing, form)
-        toast.success('Mapping updated')
-      } else {
-        await createFieldMapping(form)
-        toast.success('Mapping created')
-      }
+      await updateFieldMapping(editing, form)
+      toast.success('Mapping updated')
       setModalOpen(false)
       load()
     } catch (err) {
@@ -109,15 +117,7 @@ export default function FieldMappingPage() {
     <div>
       <PageHeader
         title="Field Mapping"
-        description="Map bank statement column headers to canonical fields so the importer can recognize them."
-        actions={
-          canWrite && (
-            <button onClick={openCreate} className="btn-primary">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Add Mapping
-            </button>
-          )
-        }
+        description="Map bank statement column headers to the fields you already have, so the importer can recognize them. New fields are added on the Custom Fields page."
       />
 
       <div className="card">
@@ -136,13 +136,11 @@ export default function FieldMappingPage() {
           <EmptyState
             icon={<GripVertical className="h-10 w-10" />}
             title="No mappings found"
-            description={search ? 'Try adjusting your search.' : 'Create your first field mapping to enable bank statement parsing.'}
-            action={!search && canWrite && (
-              <button onClick={openCreate} className="btn-primary text-sm">
-                <Plus className="h-4 w-4 mr-1.5" />
-                Add Mapping
-              </button>
-            )}
+            description={
+              search
+                ? 'Try adjusting your search.'
+                : 'This company has no fields yet. Add them on the Custom Fields page and they will appear here to be mapped.'
+            }
           />
         ) : (
           <div className="overflow-x-auto">
@@ -235,20 +233,23 @@ export default function FieldMappingPage() {
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editing ? 'Edit Mapping' : 'New Field Mapping'}
+        title="Edit Mapping"
         size="lg"
       >
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Canonical Field Name *</label>
+              <label className="label">Canonical Field Name</label>
               <input
                 value={form.fieldname}
-                onChange={(e) => setForm({ ...form, fieldname: e.target.value })}
-                className="input font-mono text-sm"
-                placeholder="e.g. withdrawal"
+                readOnly
+                className="input font-mono text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
               />
-              <p className="text-xs text-slate-400 mt-1">This becomes the column name in temp_trans. Cannot be changed after rows are staged.</p>
+              <p className="text-xs text-slate-400 mt-1">
+                The real column name in temp_trans. Renaming it here would not rename
+                the column, so it is fixed — change the Display Name instead, or
+                delete and re-add the field on Custom Fields.
+              </p>
             </div>
             <div>
               <label className="label">Display Name *</label>
@@ -296,7 +297,7 @@ export default function FieldMappingPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
-              {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
+              {saving ? 'Saving...' : 'Update'}
             </button>
           </div>
         </div>

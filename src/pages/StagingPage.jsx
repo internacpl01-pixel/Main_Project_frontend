@@ -398,16 +398,34 @@ export default function StagingPage() {
                         <td
                           key={c.name}
                           title={typeof row[c.name] === 'string' ? row[c.name] : undefined}
-                          className={`px-6 py-3 ${
-                            isNumeric(c)
-                              ? 'text-right font-mono font-medium whitespace-nowrap'
-                              : 'max-w-xs truncate'
+                          className={`px-6 py-3 align-top ${
+                            isNumeric(c) ? 'text-right font-mono font-medium whitespace-nowrap' : ''
                           }`}
                         >
-                          {renderCell(row, c)}
+                          {/* Wrap, do not truncate. This cell was `max-w-xs truncate`
+                              — ellipsis plus nowrap — and a bank narration runs 60-80
+                              characters, so every row ended in "..." with the
+                              reference number, the part that identifies the payment,
+                              hidden. Nothing ever shortened the data; the cell just
+                              refused to show it.
+
+                              The width cap sits on this div rather than on the td
+                              because under `table-layout: auto` a cell's max-width is
+                              only a suggestion — with enough columns to overflow, the
+                              browser is free to size to content and would lay the
+                              whole narration out on one line, trading an ellipsis for
+                              a very long horizontal scroll. A block inside the cell
+                              is bound by it.
+
+                              break-words, not plain wrapping: these strings contain
+                              unbroken tokens like 22112548410642 with nowhere to
+                              break, which would push past the cap on their own. */}
+                          {isNumeric(c) ? renderCell(row, c) : (
+                            <div className="max-w-md break-words">{renderCell(row, c)}</div>
+                          )}
                         </td>
                       ))}
-                      <td className="px-6 py-3">
+                      <td className="px-6 py-3 align-top">
                         {tags.length === 0 ? (
                           <span className="text-xs text-slate-300">—</span>
                         ) : (
@@ -420,7 +438,7 @@ export default function StagingPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-3 text-center">
+                      <td className="px-6 py-3 text-center align-top">
                         {row.is_classified ? (
                           <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                             <CheckCircle className="h-3.5 w-3.5" />
@@ -433,7 +451,7 @@ export default function StagingPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-3">
+                      <td className="px-6 py-3 align-top">
                         <div className="flex items-center justify-end gap-1">
                           {canWrite && !row.is_classified && (
                             <button

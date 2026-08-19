@@ -331,10 +331,20 @@ export default function UsersPage() {
             <input
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className="input"
-              placeholder="At least 3 characters"
+              className={`input ${user?.companyCode ? 'font-mono' : ''}`}
+              placeholder={user?.companyCode ? `${user.companyCode}-ravi` : 'At least 3 characters'}
               autoComplete="off"
             />
+            {/* The rule is enforced server-side in services/accounts.py; this is
+                here so it is read before the name is typed rather than after it
+                is refused. Companies registered before codes existed have none,
+                and their accounts are not held to it. */}
+            {user?.companyCode && (
+              <p className="mt-1 text-xs text-slate-500">
+                Must start with <span className="font-mono">{user.companyCode}-</span>,
+                the code for {user.companyName || 'this company'}.
+              </p>
+            )}
           </div>
           <div>
             <label className="label">Password</label>

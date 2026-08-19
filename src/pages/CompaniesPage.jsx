@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import {
   fetchCompanies, registerCompany, updateCompany, fetchClonePreview,
+  fetchDeleteCheck, deleteCompany, addCompanyAdmin,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
-import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Plus, Power, PowerOff, Pencil, LogIn } from 'lucide-react'
+import { Plus, Power, PowerOff, Pencil, Trash2, UserPlus } from 'lucide-react'
 
 const emptyForm = {
   name: '',
+  code: '',
   source: 'blank',      // 'blank' | 'copy'
   copy_from_id: '',
   // null until a preview arrives and fills it in. null and [] mean different
@@ -26,12 +27,14 @@ const emptyForm = {
  *
  * Registering here does the same work as `python -m db.migrate new-company`:
  * allocates company_NNN, creates the schema, and applies every company
- * migration to it. Seeding the first Company Admin is optional but saves a
- * step, since a company with no accounts can only be reached by a super admin
- * switching into it.
+ * migration to it. The company's code is set here and never changes: every
+ * username inside the company begins with it.
+ *
+ * This is the whole of a super admin's app. They cannot enter a company, so
+ * seeding the first Company Admin is how anyone gets in — either at
+ * registration or later, with Add admin.
  */
 export default function CompaniesPage() {
-  const { user, switchToCompany } = useAuth()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -48,6 +51,12 @@ export default function CompaniesPage() {
   const [renaming, setRenaming] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [statusConfirm, setStatusConfirm] = useState(null)
+  const [deleting, setDeleting] = useState(null)      // { company, check } | null
+  const [deleteTyped, setDeleteTyped] = useState('')
+  const [addingAdmin, setAddingAdmin] = useState(null)
+  const [adminForm, setAdminForm] = useState({ username: '', password: '' })
+  const [codeTarget, setCodeTarget] = useState(null)
+  const [codeValue, setCodeValue] = useState('')
 
   // Only active companies can be copied from — a deactivated company is a
   // retired one, and its heads and beneficiaries are exactly the stale data a
@@ -140,6 +149,16 @@ export default function CompaniesPage() {
       toast.error(`A company named "${name}" already exists`)
       return
     }
+    const code = form.code.trim().toLowerCase()
+    if (!/^[a-z]{3}$/.test(code)) {
+      toast.error('Company code must be exactly three letters (a-z)')
+      return
+    }
+    if (items.some((c) => (c.code || '').toLowerCase() === code)) {
+      toast.error(`Code "${code}" is already used by another company`)
+      return
+    }
+    setForm((f) => ({ ...f, code }))
     setStep(2)
   }
 
@@ -157,7 +176,7 @@ export default function CompaniesPage() {
 
     setSaving(true)
     try {
-      const payload = { name: form.name.trim() }
+      const payload = { name: form.name.trim(), code: form.code.trim().toLowerCase() }
       if (wantsCopy) {
         payload.copy_from_id = Number(form.copy_from_id)
         // Only when the user has actually seen the choices. If the preview
@@ -229,12 +248,67 @@ export default function CompaniesPage() {
     }
   }
 
-  const handleSwitch = async (company) => {
+  const openDelete = async (company) => {
+    // Ask the server what is in the way BEFORE offering the button, so the
+    // refusal is read as part of the decision rather than after making it.
     try {
-      await switchToCompany(company.schema_name)
-      toast.success(`Switched to ${company.name}`)
+      setDeleting({ company, check: null })
+      setDeleteTyped('')
+      setDeleting({ company, check: await fetchDeleteCheck(company.id) })
     } catch (err) {
       toast.error(err.message)
+      setDeleting(null)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleting) return
+    setSaving(true)
+    try {
+      const res = await deleteCompany(deleting.company.id, deleteTyped.trim())
+      toast.success(
+        `${res.name} deleted — schema ${res.schema_name} dropped` +
+        (res.users_removed ? `, ${res.users_removed} account(s) removed` : '')
+      )
+      setDeleting(null)
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAddAdmin = async () => {
+    if (!addingAdmin) return
+    setSaving(true)
+    try {
+      const { admin } = await addCompanyAdmin(
+        addingAdmin.id, adminForm.username.trim(), adminForm.password
+      )
+      toast.success(`'${admin.username}' created as company admin`)
+      setAddingAdmin(null)
+      setAdminForm({ username: '', password: '' })
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSetCode = async () => {
+    if (!codeTarget) return
+    setSaving(true)
+    try {
+      await updateCompany(codeTarget.id, { code: codeValue.trim().toLowerCase() })
+      toast.success(`Code set to '${codeValue.trim().toLowerCase()}'`)
+      setCodeTarget(null)
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -270,6 +344,7 @@ export default function CompaniesPage() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/50">
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Company</th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Code</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Schema</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Users</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Registered By</th>
@@ -280,10 +355,10 @@ export default function CompaniesPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr><td colSpan="7" className="px-6 py-12"><Spinner /></td></tr>
+                  <tr><td colSpan="8" className="px-6 py-12"><Spinner /></td></tr>
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan="7">
+                    <td colSpan="8">
                       <EmptyState
                         title="No companies"
                         description="Register a company to give it its own isolated ledger."
@@ -297,13 +372,25 @@ export default function CompaniesPage() {
                     </td>
                   </tr>
                 ) : (
-                  items.map((c) => {
-                    const isCurrent = c.schema_name === user?.schema
-                    return (
-                      <tr key={c.id} className={`transition-colors ${isCurrent ? 'bg-primary-50/40' : 'hover:bg-slate-50/70'}`}>
-                        <td className="px-6 py-3 font-medium text-slate-900">
-                          {c.name}
-                          {isCurrent && <span className="ml-2 text-xs font-normal text-primary-600">(current)</span>}
+                  items.map((c) => (
+                      <tr key={c.id} className="transition-colors hover:bg-slate-50/70">
+                        <td className="px-6 py-3 font-medium text-slate-900">{c.name}</td>
+                        <td className="px-6 py-3">
+                          {c.code ? (
+                            <span className="inline-flex px-2 py-0.5 rounded bg-slate-100 text-xs font-mono font-medium text-slate-700">
+                              {c.code}
+                            </span>
+                          ) : (
+                            // Registered before codes existed. Offered here rather
+                            // than left blank, because until it has one its users
+                            // cannot be held to the naming rule.
+                            <button
+                              onClick={() => { setCodeTarget(c); setCodeValue('') }}
+                              className="text-xs text-amber-700 hover:underline"
+                            >
+                              Set code
+                            </button>
+                          )}
                         </td>
                         <td className="px-6 py-3 text-xs text-slate-600 font-mono">{c.schema_name}</td>
                         <td className="px-6 py-3 text-slate-600">{c.user_count}</td>
@@ -320,13 +407,13 @@ export default function CompaniesPage() {
                         </td>
                         <td className="px-6 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            {c.is_active && !isCurrent && (
+                            {c.is_active && (
                               <button
-                                onClick={() => handleSwitch(c)}
-                                title="Switch to this company"
+                                onClick={() => { setAddingAdmin(c); setAdminForm({ username: '', password: '' }) }}
+                                title="Add a company admin"
                                 className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-primary-600"
                               >
-                                <LogIn className="h-3.5 w-3.5" />
+                                <UserPlus className="h-3.5 w-3.5" />
                               </button>
                             )}
                             <button
@@ -347,11 +434,17 @@ export default function CompaniesPage() {
                             >
                               {c.is_active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
                             </button>
+                            <button
+                              onClick={() => openDelete(c)}
+                              title="Delete permanently"
+                              className="p-1.5 rounded hover:bg-red-50 text-slate-500 hover:text-red-600"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
-                    )
-                  })
+                  ))
                 )}
               </tbody>
             </table>
@@ -378,6 +471,25 @@ export default function CompaniesPage() {
               />
               <p className="mt-1 text-xs text-slate-500">
                 Creates an isolated schema and applies every company migration to it.
+              </p>
+            </div>
+
+            <div>
+              <label className="label">Company Code</label>
+              <input
+                value={form.code}
+                onChange={(e) => setForm({ ...form, code: e.target.value.toLowerCase().slice(0, 3) })}
+                onKeyDown={(e) => e.key === 'Enter' && handleNext()}
+                className="input font-mono w-28 tracking-widest"
+                placeholder="abc"
+                maxLength={3}
+                autoComplete="off"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Exactly three letters. Every username in this company begins with
+                it, so code <span className="font-mono">{form.code || 'abc'}</span> means
+                accounts named <span className="font-mono">{(form.code || 'abc')}-ravi</span>.{' '}
+                <span className="text-slate-700 font-medium">It cannot be changed later.</span>
               </p>
             </div>
 
@@ -536,10 +648,13 @@ export default function CompaniesPage() {
                   <input
                     value={form.admin_username}
                     onChange={(e) => setForm({ ...form, admin_username: e.target.value })}
-                    className="input"
-                    placeholder="At least 3 characters"
+                    className="input font-mono"
+                    placeholder={(form.code || 'abc') + '-admin'}
                     autoComplete="off"
                   />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Must start with <span className="font-mono">{(form.code || 'abc')}-</span>.
+                  </p>
                 </div>
                 <div>
                   <label className="label">Password</label>
@@ -592,6 +707,166 @@ export default function CompaniesPage() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* Add an admin to an existing company. A super admin cannot go in, so
+          this is the only way to put someone inside one after registration —
+          without it, a company whose last admin was deleted is unreachable. */}
+      <Modal
+        isOpen={!!addingAdmin}
+        onClose={() => setAddingAdmin(null)}
+        title={'Add admin to ' + (addingAdmin ? addingAdmin.name : '')}
+      >
+        <div className="space-y-4">
+          {addingAdmin && !addingAdmin.code && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              This company has no code yet, so no prefix is required. Set one from
+              the Code column to apply the naming rule to future accounts.
+            </p>
+          )}
+          <div>
+            <label className="label">Username</label>
+            <input
+              value={adminForm.username}
+              onChange={(e) => setAdminForm({ ...adminForm, username: e.target.value })}
+              className="input font-mono"
+              placeholder={addingAdmin && addingAdmin.code ? addingAdmin.code + '-admin' : 'At least 3 characters'}
+              autoComplete="off"
+            />
+            {addingAdmin && addingAdmin.code && (
+              <p className="mt-1 text-xs text-slate-500">
+                Must start with <span className="font-mono">{addingAdmin.code}-</span>.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="label">Password</label>
+            <input
+              type="password"
+              value={adminForm.password}
+              onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+              className="input"
+              placeholder="At least 4 characters"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setAddingAdmin(null)} className="btn-secondary text-sm">Cancel</button>
+            <button onClick={handleAddAdmin} disabled={saving} className="btn-primary text-sm">
+              {saving ? 'Creating...' : 'Create Admin'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Backfill a code onto a company registered before codes existed. */}
+      <Modal
+        isOpen={!!codeTarget}
+        onClose={() => setCodeTarget(null)}
+        title={'Set code for ' + (codeTarget ? codeTarget.name : '')}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label">Company Code</label>
+            <input
+              value={codeValue}
+              onChange={(e) => setCodeValue(e.target.value.toLowerCase().slice(0, 3))}
+              className="input font-mono w-28 tracking-widest"
+              placeholder="abc"
+              maxLength={3}
+              autoFocus
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Three letters, set once. New accounts here will have to start with it.
+              The {codeTarget ? codeTarget.user_count : 0} existing account(s) keep
+              their names and keep working.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setCodeTarget(null)} className="btn-secondary text-sm">Cancel</button>
+            <button onClick={handleSetCode} disabled={saving} className="btn-primary text-sm">
+              {saving ? 'Saving...' : 'Set Code'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Permanent delete. The server refuses any company holding data; this
+          asks it first, so the refusal is read before the decision rather
+          than after it. */}
+      <Modal
+        isOpen={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={'Delete ' + (deleting ? deleting.company.name : '')}
+      >
+        {!deleting || !deleting.check ? (
+          <Spinner />
+        ) : !deleting.check.can_delete ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">{deleting.check.reason}</p>
+            <p className="text-xs text-slate-500">
+              Deleting is for throwing away a company created by mistake. Anything
+              with a ledger gets deactivated instead — it disappears from the list
+              and nobody can sign in, but nothing is destroyed.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setDeleting(null)} className="btn-secondary text-sm">Close</button>
+              <button
+                onClick={() => { setStatusConfirm(deleting.company); setDeleting(null) }}
+                className="btn-primary text-sm"
+              >
+                Deactivate instead
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">
+              This drops the schema{' '}
+              <span className="font-mono">{deleting.company.schema_name}</span>
+              {deleting.check.users > 0 && <> and removes {deleting.check.users} account(s)</>}.
+              It holds no transactions, staged rows or imports.
+            </p>
+            {/* No ledger is not the same as nothing of value. A company can hold
+                a field setup someone spent an afternoon on and still have never
+                taken a statement — that is exactly the case the transaction
+                count does not catch. */}
+            {deleting.check.holds &&
+              (deleting.check.holds.fields || deleting.check.holds.projects || deleting.check.holds.masters) && (
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Its setup goes too: <strong>{deleting.check.holds.fields}</strong> fields,{' '}
+                <strong>{deleting.check.holds.projects}</strong> projects and{' '}
+                <strong>{deleting.check.holds.masters}</strong> master records. If you
+                want to keep that, register a copy of this company first.
+              </p>
+            )}
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              Permanent. There is no undo and no backup.
+            </p>
+            <div>
+              <label className="label">
+                Type <span className="font-medium">{deleting.company.name}</span> to confirm
+              </label>
+              <input
+                value={deleteTyped}
+                onChange={(e) => setDeleteTyped(e.target.value)}
+                className="input"
+                autoComplete="off"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setDeleting(null)} className="btn-secondary text-sm">Cancel</button>
+              <button
+                onClick={handleDelete}
+                disabled={saving || deleteTyped.trim() !== deleting.company.name}
+                className="btn-primary text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-300"
+              >
+                {saving ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <ConfirmDialog

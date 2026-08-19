@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { login, logout as apiLogout, getMe, switchCompany } from '../api/endpoints.js'
+import { login, logout as apiLogout, getMe } from '../api/endpoints.js'
 
 const AuthContext = createContext(null)
 
@@ -52,6 +52,9 @@ export function AuthProvider({ children }) {
       // from the token, so renaming a company does not need everyone to sign in
       // again for the header to catch up.
       companyName: me.company_name || null,
+      // The three-letter prefix every username in this company carries. Null
+      // for a super admin, and for a company registered before codes existed.
+      companyCode: me.company_code || null,
       schema: me.schema,
       assignableRoles: me.assignable_roles || [],
     })
@@ -99,14 +102,9 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const switchToCompany = async (schemaName) => {
-    const data = await switchCompany(schemaName)
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('schema', data.schema)
-    // The new token carries a company_id the old one lacked, so re-read identity.
-    applyIdentity(await getMe())
-    return data
-  }
+  // There is no switchToCompany. A super admin administers companies rather
+  // than working inside one, so there is no company to switch into — the
+  // backend dependency that resolves a request's schema refuses them outright.
 
   // Default to STAFF, the least authority — an unknown level must never be
   // mistaken for an admin.
@@ -118,7 +116,6 @@ export function AuthProvider({ children }) {
     loading,
     signIn,
     signOut,
-    switchToCompany,
     level,
     hasLevel,
     canWrite: hasLevel(MANAGER),

@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth, MANAGER, SUPER_ADMIN } from '../context/AuthContext.jsx'
-import CompanySwitcher from './CompanySwitcher.jsx'
 import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
@@ -15,6 +14,10 @@ import { useState } from 'react'
 // requiredLevel omitted means everyone signed in, staff included. Staff can
 // open every ungated page — the write controls inside them are hidden
 // separately, so there is nothing gained by hiding the page itself.
+//
+// A super admin sees only the entries marked companyScoped: false. They have no
+// company schema and the API refuses them company data, so every other item
+// would be a link to a 403.
 const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/projects', icon: FolderKanban, label: 'Projects' },
@@ -28,7 +31,7 @@ const NAV = [
   { to: '/staging', icon: FileSpreadsheet, label: 'Imported Rows' },
   { to: '/export', icon: ArrowDownToLine, label: 'Export' },
   { to: '/users', icon: Users, label: 'Users', requiredLevel: MANAGER },
-  { to: '/companies', icon: Building2, label: 'Companies', requiredLevel: SUPER_ADMIN },
+  { to: '/companies', icon: Building2, label: 'Companies', requiredLevel: SUPER_ADMIN, companyScoped: false },
 ]
 
 export default function Layout() {
@@ -48,6 +51,15 @@ export default function Layout() {
   // 'admin' is the cross-company schema — it has no projects/transactions
   // tables, so no page can render against it.
   const hasCompany = Boolean(user?.schema) && user.schema !== 'admin'
+
+  // A super admin belongs to no company and cannot enter one. Their whole app
+  // is the Companies page, so the sidebar shows that and nothing else rather
+  // than a list of links that all end in 403.
+  const visibleNav = NAV.filter((item) => {
+    if (item.requiredLevel !== undefined && !hasLevel(item.requiredLevel)) return false
+    if (isSuperAdmin && item.companyScoped !== false) return false
+    return true
+  })
 
   const handleLogout = () => {
     signOut()
@@ -74,7 +86,7 @@ export default function Layout() {
         </div>
 
         <nav className="p-3 space-y-0.5">
-          {NAV.filter((item) => item.requiredLevel === undefined || hasLevel(item.requiredLevel)).map((item) => (
+          {visibleNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -94,8 +106,8 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Company badge */}
-        {hasCompany && (
+        {/* Company badge. Absent for a super admin, who has no company. */}
+        {hasCompany && !isSuperAdmin && (
           <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-slate-100">
             {/* Name first, schema underneath. This used to show `company_001`
                 and nothing else, which is the database's word for the company,
@@ -124,13 +136,12 @@ export default function Layout() {
                 <Menu className="h-5 w-5" />
               </button>
               <h1 className="text-sm font-medium text-slate-700 lg:hidden">Ledger</h1>
-              {/* Two ways to name the company, by who is looking.
-                  A super admin gets the switcher, which already shows the name
-                  and is how they change company. Everyone else — staff, manager,
-                  company admin — is bound to one company and only needs to see
-                  which, so they get a plain label rather than a dead dropdown.
-                  Falls back to the schema if the name has not arrived yet. */}
-              {isSuperAdmin && hasCompany && <CompanySwitcher variant="menu" />}
+              {/* Everyone bound to a company sees which one, next to their name.
+                  A super admin is bound to none — they administer companies from
+                  the Companies page — so they get a plain marker instead. */}
+              {isSuperAdmin && (
+                <span className="text-sm font-medium text-slate-500">All companies</span>
+              )}
               {!isSuperAdmin && hasCompany && (
                 <div className="flex items-center gap-2 min-w-0">
                   <Building2 className="h-4 w-4 text-slate-400 shrink-0" />
@@ -187,7 +198,12 @@ export default function Layout() {
           {hasCompany || !needsCompany ? (
             <Outlet key={user.schema} />
           ) : (
-            <CompanySwitcher variant="panel" />
+            <div className="card p-8 text-center">
+              <p className="text-sm text-slate-600">
+                This account is not attached to a company, so there is nothing here
+                to show. Ask a super admin to check your account.
+              </p>
+            </div>
           )}
         </main>
       </div>

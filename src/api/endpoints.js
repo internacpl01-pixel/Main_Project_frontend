@@ -19,12 +19,9 @@ export async function getMe() {
   return data
 }
 
-export async function switchCompany(schemaName) {
-  // The backend declares Body(..., embed=True) on `schema_name`, so the key
-  // must be schema_name. Sending `schema` returned 422 every time.
-  const { data } = await api.post('/auth/switch-company', { schema_name: schemaName })
-  return data
-}
+// POST /auth/switch-company no longer exists. A super admin administers
+// companies and does not work inside one, so there is no company for them to
+// switch into — see the note in backend/routers/auth.py.
 
 // ── Companies (super-admin only) ─────────────────────────────────────────────
 
@@ -36,7 +33,8 @@ export async function fetchCompanies(includeInactive = false) {
 }
 
 export async function registerCompany(payload) {
-  // payload: { name, copy_from_id?, admin_username?, admin_password? }
+  // payload: { name, code, copy_from_id?, admin_username?, admin_password? }
+  // code is three lowercase letters and prefixes every username in the company.
   // copy_from_id gives the new company the source's columns, fieldmap, projects
   // and master data — never its transactions, imports or accounts.
   // Returns { company, admin, copied }. admin is null when no first admin was
@@ -52,8 +50,30 @@ export async function fetchClonePreview(companyId) {
   return data
 }
 
+export async function fetchDeleteCheck(companyId) {
+  // Whether the company can be deleted and what is blocking it, asked before
+  // the confirm dialog offers the button.
+  const { data } = await api.get(`/companies/${companyId}/delete-check`)
+  return data
+}
+
+export async function deleteCompany(companyId, confirmName) {
+  // Permanent, and refused server-side unless the company holds no data.
+  // confirm_name must match the company's name exactly.
+  const { data } = await api.delete(`/companies/${companyId}`, {
+    data: { confirm_name: confirmName },
+  })
+  return data
+}
+
+export async function addCompanyAdmin(companyId, username, password) {
+  // The super admin's only way to put a person inside a company.
+  const { data } = await api.post(`/companies/${companyId}/admin`, { username, password })
+  return data
+}
+
 export async function updateCompany(companyId, payload) {
-  // payload: { name?, is_active? }
+  // payload: { name?, code?, is_active? }
   const { data } = await api.patch(`/companies/${companyId}`, payload)
   return data
 }
@@ -141,11 +161,11 @@ export async function fetchFieldMap() {
 }
 export const fetchFieldMappings = fetchFieldMap
 
-export async function createFieldMapEntry(payload) {
-  const { data } = await api.post('/fieldmap/', payload)
-  return data
-}
-export const createFieldMapping = createFieldMapEntry
+// There is no createFieldMapEntry. POST /fieldmap/ was removed: a mapping with
+// no real column behind it still competes for a statement's header row, and one
+// named Debit/Credit outmatched the real amount column's "Credit" alias, took
+// the column and had nowhere to put the value. Fields are created by
+// createCustomField below, which makes the column and the mapping together.
 
 export async function updateFieldMapEntry(fieldmapId, payload) {
   const { data } = await api.patch(`/fieldmap/${fieldmapId}`, payload)
