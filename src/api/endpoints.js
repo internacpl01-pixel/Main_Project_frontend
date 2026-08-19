@@ -36,9 +36,19 @@ export async function fetchCompanies(includeInactive = false) {
 }
 
 export async function registerCompany(payload) {
-  // payload: { name, admin_username?, admin_password? }
-  // Returns { company, admin } — admin is null when no first admin was seeded.
+  // payload: { name, copy_from_id?, admin_username?, admin_password? }
+  // copy_from_id gives the new company the source's columns, fieldmap, projects
+  // and master data — never its transactions, imports or accounts.
+  // Returns { company, admin, copied }. admin is null when no first admin was
+  // seeded; copied is null for a blank company.
   const { data } = await api.post('/companies/', payload)
+  return data
+}
+
+export async function fetchClonePreview(companyId) {
+  // What copying this company would bring across, counted server-side.
+  // { company, fields, custom_columns, projects, masters, tables }
+  const { data } = await api.get(`/companies/${companyId}/clone-preview`)
   return data
 }
 

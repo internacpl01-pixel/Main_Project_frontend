@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react'
-import { fetchCompanies, registerCompany, updateCompany } from '../api/endpoints.js'
+import {
+  fetchCompanies, registerCompany, updateCompany, fetchClonePreview,
+} from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import { Plus, Power, PowerOff, Pencil, LogIn } from 'lucide-react'
 
-const emptyForm = { name: '', admin_username: '', admin_password: '' }
+const emptyForm = {
+  name: '',
+  source: 'blank',      // 'blank' | 'copy'
+  copy_from_id: '',
+  admin_username: '',
+  admin_password: '',
+}
 
 /**
  * The company registry — every tenant registered on this install, who
@@ -25,15 +33,44 @@ export default function CompaniesPage() {
   const [error, setError] = useState('')
   const [showInactive, setShowInactive] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  // The register modal is two screens: name, then how it should start. The name
+  // is checked on Next rather than on Create, so a clash surfaces before the
+  // user has configured anything else.
+  const [step, setStep] = useState(1)
   const [form, setForm] = useState(emptyForm)
+  const [preview, setPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [renaming, setRenaming] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [statusConfirm, setStatusConfirm] = useState(null)
 
+  // Only active companies can be copied from — a deactivated company is a
+  // retired one, and its heads and beneficiaries are exactly the stale data a
+  // new company should not inherit. The server refuses these too.
+  const copyable = items.filter((c) => c.is_active)
+  const copySource = copyable.find((c) => String(c.id) === String(form.copy_from_id))
+
   useEffect(() => {
     load()
   }, [showInactive])
+
+  // What the chosen company would actually bring across. Counted by the server
+  // rather than described in the UI, so the sentence the user agrees to is the
+  // one that happens.
+  useEffect(() => {
+    if (form.source !== 'copy' || !form.copy_from_id) {
+      setPreview(null)
+      return
+    }
+    let cancelled = false
+    setPreviewLoading(true)
+    fetchClonePreview(form.copy_from_id)
+      .then((p) => { if (!cancelled) setPreview(p) })
+      .catch(() => { if (!cancelled) setPreview(null) })
+      .finally(() => { if (!cancelled) setPreviewLoading(false) })
+    return () => { cancelled = true }
+  }, [form.source, form.copy_from_id])
 
   const load = async () => {
     setLoading(true)
@@ -47,9 +84,34 @@ export default function CompaniesPage() {
     }
   }
 
+  const openRegister = () => {
+    setForm(emptyForm)
+    setPreview(null)
+    setStep(1)
+    setModalOpen(true)
+  }
+
+  const handleNext = () => {
+    const name = form.name.trim()
+    if (name.length < 2) {
+      toast.error('Company name must be at least 2 characters')
+      return
+    }
+    // Checked against the list already on screen. The server is still the
+    // authority — it also sees companies this page is not showing — but
+    // catching it here means the user is not asked to fill in a second screen
+    // for a name that was never going to be accepted.
+    if (items.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) {
+      toast.error(`A company named "${name}" already exists`)
+      return
+    }
+    setStep(2)
+  }
+
   const handleRegister = async () => {
-    if (!form.name.trim()) {
-      toast.error('Company name is required')
+    const wantsCopy = form.source === 'copy'
+    if (wantsCopy && !form.copy_from_id) {
+      toast.error('Pick the company to copy from')
       return
     }
     const wantsAdmin = form.admin_username.trim() || form.admin_password
@@ -61,18 +123,26 @@ export default function CompaniesPage() {
     setSaving(true)
     try {
       const payload = { name: form.name.trim() }
+      if (wantsCopy) payload.copy_from_id = Number(form.copy_from_id)
       if (wantsAdmin) {
         payload.admin_username = form.admin_username.trim()
         payload.admin_password = form.admin_password
       }
-      const { company, admin } = await registerCompany(payload)
-      toast.success(
-        admin
-          ? `${company.name} registered as ${company.schema_name}, admin '${admin.username}' created`
-          : `${company.name} registered as ${company.schema_name}`
-      )
+      const { company, admin, copied } = await registerCompany(payload)
+      // Report what actually happened rather than "done" — a copy is the kind
+      // of operation people want to see confirmed in numbers.
+      const parts = [`${company.name} registered as ${company.schema_name}`]
+      if (copied) {
+        parts.push(
+          `copied ${copied.fields} fields and ` +
+          `${copied.projects + copied.masters} records from ${copied.source_name}`
+        )
+      }
+      if (admin) parts.push(`admin '${admin.username}' created`)
+      toast.success(parts.join(' — '))
       setModalOpen(false)
       setForm(emptyForm)
+      setPreview(null)
       load()
     } catch (err) {
       toast.error(err.message)
@@ -127,7 +197,7 @@ export default function CompaniesPage() {
         title="Companies"
         description="Every company registered on this install."
         actions={
-          <button onClick={() => { setForm(emptyForm); setModalOpen(true) }} className="btn-primary">
+          <button onClick={openRegister} className="btn-primary">
             <Plus className="h-4 w-4 mr-1.5" />
             Register Company
           </button>
@@ -171,7 +241,7 @@ export default function CompaniesPage() {
                         title="No companies"
                         description="Register a company to give it its own isolated ledger."
                         action={
-                          <button onClick={() => { setForm(emptyForm); setModalOpen(true) }} className="btn-primary text-sm">
+                          <button onClick={openRegister} className="btn-primary text-sm">
                             <Plus className="h-4 w-4 mr-1.5" />
                             Register Company
                           </button>
@@ -242,59 +312,173 @@ export default function CompaniesPage() {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Register Company">
-        <div className="space-y-4">
-          <div>
-            <label className="label">Company Name</label>
-            <input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="input"
-              placeholder="e.g. DPL Homes"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              Creates an isolated schema and applies every company migration to it.
-            </p>
-          </div>
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={step === 1 ? 'Register Company' : `How should ${form.name.trim()} start?`}
+      >
+        {step === 1 ? (
+          <div className="space-y-4">
+            <div>
+              <label className="label">Company Name</label>
+              <input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && handleNext()}
+                className="input"
+                placeholder="e.g. DPL Homes"
+                autoFocus
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Creates an isolated schema and applies every company migration to it.
+              </p>
+            </div>
 
-          <div className="border-t border-slate-100 pt-4">
-            <p className="text-sm font-medium text-slate-700">First Company Admin</p>
-            <p className="mt-0.5 mb-3 text-xs text-slate-500">
-              Optional. Leave blank and the company starts with no accounts — only a
-              super admin can reach it until you add one.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label className="label">Username</label>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
+              <button onClick={handleNext} className="btn-primary text-sm">Next</button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Blank or copied. The copy option spells out what does and does
+                not come across: "copy a company" reads to most people as "copy
+                everything", and the one thing it never copies is the ledger. */}
+            <div className="space-y-2">
+              <label
+                className={`flex gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  form.source === 'blank'
+                    ? 'border-primary-300 bg-primary-50/50'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
                 <input
-                  value={form.admin_username}
-                  onChange={(e) => setForm({ ...form, admin_username: e.target.value })}
-                  className="input"
-                  placeholder="At least 3 characters"
-                  autoComplete="off"
+                  type="radio"
+                  className="mt-0.5"
+                  checked={form.source === 'blank'}
+                  onChange={() => setForm({ ...form, source: 'blank', copy_from_id: '' })}
                 />
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Blank company</p>
+                  <p className="text-xs text-slate-500">
+                    Starts with the default field setup and nothing in it.
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  form.source === 'copy'
+                    ? 'border-primary-300 bg-primary-50/50'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="mt-0.5"
+                  checked={form.source === 'copy'}
+                  onChange={() => setForm({ ...form, source: 'copy' })}
+                  disabled={copyable.length === 0}
+                />
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Copy an existing company</p>
+                  <p className="text-xs text-slate-500">
+                    Copies field structure, labels and master data.{' '}
+                    <span className="text-slate-700 font-medium">
+                      Does not copy transactions, imports or users.
+                    </span>
+                  </p>
+                  {copyable.length === 0 && (
+                    <p className="mt-1 text-xs text-slate-400">
+                      No active company to copy from yet.
+                    </p>
+                  )}
+                </div>
+              </label>
+            </div>
+
+            {form.source === 'copy' && (
+              <div className="pl-1">
+                <label className="label">Copy from</label>
+                <select
+                  value={form.copy_from_id}
+                  onChange={(e) => setForm({ ...form, copy_from_id: e.target.value })}
+                  className="input"
+                >
+                  <option value="">Select a company...</option>
+                  {copyable.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+
+                {previewLoading && (
+                  <p className="mt-2 text-xs text-slate-400">Checking what would be copied...</p>
+                )}
+
+                {preview && !previewLoading && (
+                  <div className="mt-2 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <p className="text-xs text-slate-700">
+                      Copies <strong>{preview.fields}</strong> fields
+                      {preview.custom_columns > 0 && <> (<strong>{preview.custom_columns}</strong> custom)</>},{' '}
+                      <strong>{preview.projects}</strong> projects and{' '}
+                      <strong>{preview.masters}</strong> master records.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      No transactions, imports or accounts are copied. A copy is a
+                      snapshot — changing {copySource?.name || 'the source'} later will
+                      not change this company.
+                    </p>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="label">Password</label>
-                <input
-                  type="password"
-                  value={form.admin_password}
-                  onChange={(e) => setForm({ ...form, admin_password: e.target.value })}
-                  className="input"
-                  placeholder="At least 4 characters"
-                  autoComplete="new-password"
-                />
+            )}
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-sm font-medium text-slate-700">First Company Admin</p>
+              <p className="mt-0.5 mb-3 text-xs text-slate-500">
+                Optional. Leave blank and the company starts with no accounts — only a
+                super admin can reach it until you add one.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="label">Username</label>
+                  <input
+                    value={form.admin_username}
+                    onChange={(e) => setForm({ ...form, admin_username: e.target.value })}
+                    className="input"
+                    placeholder="At least 3 characters"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="label">Password</label>
+                  <input
+                    type="password"
+                    value={form.admin_password}
+                    onChange={(e) => setForm({ ...form, admin_password: e.target.value })}
+                    className="input"
+                    placeholder="At least 4 characters"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-between gap-3 pt-2">
+              {/* Back keeps the name — the whole point of splitting the screens
+                  is that changing your mind here is free. */}
+              <button onClick={() => setStep(1)} className="btn-secondary text-sm">Back</button>
+              <div className="flex gap-3">
+                <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
+                <button onClick={handleRegister} disabled={saving} className="btn-primary text-sm">
+                  {saving
+                    ? (form.source === 'copy' ? 'Copying...' : 'Registering...')
+                    : (form.source === 'copy' ? 'Create Copy' : 'Register')}
+                </button>
               </div>
             </div>
           </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
-            <button onClick={handleRegister} disabled={saving} className="btn-primary text-sm">
-              {saving ? 'Registering...' : 'Register'}
-            </button>
-          </div>
-        </div>
+        )}
       </Modal>
 
       <Modal isOpen={!!renaming} onClose={() => setRenaming(null)} title="Rename Company">
