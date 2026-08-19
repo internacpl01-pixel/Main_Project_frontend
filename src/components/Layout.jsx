@@ -97,9 +97,18 @@ export default function Layout() {
         {/* Company badge */}
         {hasCompany && (
           <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-slate-100">
-            <div className="px-3 py-2 bg-slate-50 rounded-lg text-xs text-slate-500">
-              <span className="text-slate-400">Company:</span>{' '}
-              <span className="font-medium text-slate-700">{user.schema}</span>
+            {/* Name first, schema underneath. This used to show `company_001`
+                and nothing else, which is the database's word for the company,
+                not the company's. The schema stays visible because it is what
+                every error message and support question refers to. */}
+            <div className="px-3 py-2 bg-slate-50 rounded-lg">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400">Company</div>
+              <div className="text-xs font-medium text-slate-700 truncate" title={user.companyName || ''}>
+                {user.companyName || user.schema}
+              </div>
+              {user.companyName && (
+                <div className="text-[11px] text-slate-400 font-mono truncate">{user.schema}</div>
+              )}
             </div>
           </div>
         )}
@@ -115,7 +124,24 @@ export default function Layout() {
                 <Menu className="h-5 w-5" />
               </button>
               <h1 className="text-sm font-medium text-slate-700 lg:hidden">Ledger</h1>
+              {/* Two ways to name the company, by who is looking.
+                  A super admin gets the switcher, which already shows the name
+                  and is how they change company. Everyone else — staff, manager,
+                  company admin — is bound to one company and only needs to see
+                  which, so they get a plain label rather than a dead dropdown.
+                  Falls back to the schema if the name has not arrived yet. */}
               {isSuperAdmin && hasCompany && <CompanySwitcher variant="menu" />}
+              {!isSuperAdmin && hasCompany && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="h-4 w-4 text-slate-400 shrink-0" />
+                  <span
+                    className="text-sm font-medium text-slate-700 truncate max-w-[40vw] sm:max-w-xs"
+                    title={user.schema}
+                  >
+                    {user.companyName || user.schema}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="relative">

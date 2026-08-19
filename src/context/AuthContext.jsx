@@ -47,6 +47,11 @@ export function AuthProvider({ children }) {
       roleLabel: me.role_label,
       level: me.level ?? 0,
       companyId: me.company_id,
+      // The company's real name, for the header. Null for a super admin who has
+      // not picked a company yet. Comes from /auth/me on every load rather than
+      // from the token, so renaming a company does not need everyone to sign in
+      // again for the header to catch up.
+      companyName: me.company_name || null,
       schema: me.schema,
       assignableRoles: me.assignable_roles || [],
     })
