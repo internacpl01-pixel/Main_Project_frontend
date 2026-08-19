@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  fetchCustomFields, createCustomField, deleteCustomField, updateFieldMapEntry,
+  fetchCustomFields, createCustomField, deleteCustomFieldById, deleteCustomField,
+  updateFieldMapEntry,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog, MethodInput, MethodBadge } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
@@ -93,7 +94,10 @@ export default function CustomFieldsPage() {
     if (!deleteTarget) return
     setSaving(true)
     try {
-      await deleteCustomField(deleteTarget.fieldname)
+      // Every row on this page comes from the fieldmap and therefore has an id.
+      // Falling back to the name covers an orphaned column with no mapping row.
+      if (deleteTarget.id) await deleteCustomFieldById(deleteTarget.id)
+      else await deleteCustomField(deleteTarget.fieldname)
       toast.success(`Field '${deleteTarget.fieldname}' deleted`)
       setDeleteTarget(null)
       load()

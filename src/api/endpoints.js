@@ -202,7 +202,18 @@ export async function createCustomField(type, displayname = '', mapfields = '', 
   return data
 }
 
+export async function deleteCustomFieldById(fieldmapId) {
+  // By id, not by name. A fieldname is not guaranteed to be URL-safe: a mapping
+  // called 'Debit/Credit' contains a path separator, and encodeURIComponent does
+  // not save it — the server decodes %2F back to / before routing, so the
+  // request 404s on a field that is plainly on screen.
+  const { data } = await api.delete(`/custom-fields/by-id/${fieldmapId}`)
+  return data
+}
+
 export async function deleteCustomField(fieldname) {
+  // By name. Only reaches a field whose name is a legal column name; used for
+  // an orphaned column that has no fieldmap row, and so has no id.
   const { data } = await api.delete(`/custom-fields/${encodeURIComponent(fieldname)}`)
   return data
 }
