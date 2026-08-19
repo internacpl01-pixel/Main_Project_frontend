@@ -15,17 +15,6 @@ export function Spinner({ size = 'md', className = '' }) {
   )
 }
 
-export function LoadingOverlay({ message = 'Loading...' }) {
-  return (
-    <div className="flex items-center justify-center py-16">
-      <div className="text-center">
-        <Spinner size="lg" />
-        <p className="mt-3 text-sm text-slate-500">{message}</p>
-      </div>
-    </div>
-  )
-}
-
 export function EmptyState({ icon, title, description, action }) {
   return (
     <div className="text-center py-16">
@@ -33,26 +22,6 @@ export function EmptyState({ icon, title, description, action }) {
       <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
       <p className="mt-1 text-sm text-slate-500">{description}</p>
       {action && <div className="mt-4">{action}</div>}
-    </div>
-  )
-}
-
-export function ErrorMessage({ message, onRetry }) {
-  return (
-    <div className="rounded-lg bg-red-50 border border-red-200 p-4">
-      <div className="flex items-start">
-        <svg className="h-5 w-5 text-red-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-        </svg>
-        <div className="ml-3 flex-1">
-          <p className="text-sm text-red-700">{message}</p>
-          {onRetry && (
-            <button onClick={onRetry} className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium">
-              Try again
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
@@ -106,7 +75,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
 
 // Known values are offered as a datalist, not a <select> — `method` is free
 // text on purpose, so anything can be typed and the list is only a shortcut.
-export const METHOD_SUGGESTIONS = ['import', 'selection', 'rule']
+const METHOD_SUGGESTIONS = ['import', 'selection', 'rule']
 
 export function MethodInput({ value, onChange, id = 'method-options' }) {
   return (
