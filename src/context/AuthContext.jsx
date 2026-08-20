@@ -32,6 +32,24 @@ export const ROLE_LABELS = {
   super_admin: 'Super Admin',
 }
 
+/**
+ * /auth/me, with one retry when the server did not answer at all.
+ *
+ * A backend that is restarting or momentarily blocked answers nothing for a few
+ * seconds. Without the retry that window is indistinguishable from a dead
+ * session on every page load. An error carrying a status came FROM the server,
+ * so it is an answer and retrying it would only repeat it.
+ */
+async function loadIdentity() {
+  try {
+    return await getMe()
+  } catch (err) {
+    if (err.status) throw err
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    return await getMe()
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -64,12 +82,22 @@ export function AuthProvider({ children }) {
       const token = localStorage.getItem('access_token')
       if (token) {
         try {
-          applyIdentity(await getMe())
-        } catch {
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('username')
-          localStorage.removeItem('role')
-          localStorage.removeItem('schema')
+          applyIdentity(await loadIdentity())
+        } catch (err) {
+          // Only clear the session when the SERVER rejected it. A request that
+          // never got an answer says nothing about the token — the backend may
+          // be restarting, or busy parsing a long statement, or the laptop may
+          // be offline — and discarding it there signs the user out of a valid
+          // session and asks them to retype a password that was never wrong.
+          // That is exactly what happened after a large import: the upload tied
+          // the backend up, this call failed with no response, and the refresh
+          // that followed looked like a logout.
+          if (err.status === 401 || err.status === 403) {
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('username')
+            localStorage.removeItem('role')
+            localStorage.removeItem('schema')
+          }
         }
       }
       setLoading(false)
@@ -85,7 +113,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('username', username)
     // Fetch the full identity rather than piecing it together from the login
     // response, so there is exactly one shape of `user` in the app.
-    applyIdentity(await getMe())
+    applyIdentity(await loadIdentity())
     return data
   }
 

@@ -1,20 +1,47 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { importPdf, importExcel, importCsv, fetchMasterData } from '../api/endpoints.js'
+import {
+  importPdf, importExcel, importCsv, fetchMasterData, pollImportJob,
+} from '../api/endpoints.js'
 import toast from 'react-hot-toast'
 import {
-  Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight,
+  Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
 // There is no dry run and no confirm — /imports/* is always called with
 // save=true, exactly as DPL's Api.uploadPdf always sent save:'true'. What the
 // parser found is reported afterwards, from the same response.
-async function importFile(file, bankId = null, password = '') {
+//
+// A PDF goes the background route: it hands back a job id in milliseconds and
+// the parse continues server-side, which is what makes a real progress bar
+// possible and what keeps a long statement from outliving the request. Excel
+// and CSV stay direct — they finish in about a second, so a job would be more
+// machinery than the work it describes.
+async function importFile(file, bankId = null, password = '', pages = '', onProgress) {
   const ext = file.name.split('.').pop().toLowerCase()
-  if (ext === 'pdf') return importPdf(file, true, bankId, password)
+  if (ext === 'pdf') {
+    const started = await importPdf(file, true, bankId, password,
+                                    { pages, background: true })
+    return pollImportJob(started.job_id, onProgress)
+  }
   if (ext === 'csv') return importCsv(file, true, bankId)
   return importExcel(file, true, bankId)
+}
+
+// Blank means the whole file. Otherwise a count ("30") or a range ("31-65"),
+// validated here only enough to catch a typo before it costs a round trip —
+// the server decides what is actually in range, since only it knows the file.
+function pageSpecError(spec) {
+  const s = (spec || '').trim()
+  if (!s) return ''
+  if (/^\d+$/.test(s)) return Number(s) >= 1 ? '' : 'Page count must be at least 1.'
+  const m = s.match(/^(\d+)\s*-\s*(\d+)$/)
+  if (!m) return 'Use a count like 30, a range like 31-65, or leave it blank.'
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  if (a < 1) return 'Pages start at 1.'
+  if (b < a) return `${a}-${b} runs backwards.`
+  return ''
 }
 
 // parsers.py signals both of these as RuntimeError, which the router maps to a
@@ -35,6 +62,10 @@ export default function ImportPage() {
   // persisted, never sent anywhere but /imports/pdf.
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState('')
+  // "" = every page. A count or a range narrows it.
+  const [pages, setPages] = useState('')
+  // The last reading from the running job, or null when nothing is running.
+  const [progress, setProgress] = useState(null)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -59,10 +90,15 @@ export default function ImportPage() {
   }
 
   const handleImport = async () => {
+    const specError = pageSpecError(pages)
+    if (specError) { toast.error(specError); return }
+
     setImporting(true)
     setPwError('')
+    setProgress(null)
     try {
-      const res = await importFile(file, bankId || null, password)
+      const res = await importFile(file, bankId || null, password, pages.trim(),
+                                   setProgress)
       setResult(res)
       if (res.row_count > 0) toast.success(`Imported ${res.row_count} rows`)
       else toast.error('No transaction rows could be extracted from this file.')
@@ -78,15 +114,22 @@ export default function ImportPage() {
       }
     } finally {
       setImporting(false)
+      setProgress(null)
     }
   }
 
   const reset = () => {
     setFile(null); setResult(null); setImporting(false)
-    setPassword(''); setPwError('')
+    setPassword(''); setPwError(''); setPages(''); setProgress(null)
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
+  const pageSpecErrorText = pageSpecError(pages)
+  // A range not starting at page 1 gets page 1 added server-side, for its
+  // header. Said before the upload rather than after, so the duplicate rows it
+  // produces are expected rather than alarming.
+  const rangeStartsLate = /^\s*(\d+)\s*-\s*\d+\s*$/.test(pages)
+    && Number(pages.trim().split('-')[0]) > 1
 
   // Columns the parser matched to a field, and headers it could not place.
   const headers = result?.headers_detected || {}
@@ -194,14 +237,83 @@ export default function ImportPage() {
                   )}
                 </div>
               )}
+
+              {isPdf && (
+                <div className="sm:col-span-2">
+                  <label className="label">
+                    Pages to read{' '}
+                    <span className="text-slate-400 font-normal">(blank = the whole file)</span>
+                  </label>
+                  <input
+                    value={pages}
+                    onChange={(e) => setPages(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !importing) handleImport() }}
+                    autoComplete="off"
+                    placeholder="All pages — or 30 for the first 30, or 31-65 for a range"
+                    className={`input ${pageSpecErrorText ? 'border-red-300 focus:ring-red-200' : ''}`}
+                  />
+                  {pageSpecErrorText ? (
+                    <p className="mt-1 text-xs text-red-600 flex items-start gap-1">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />{pageSpecErrorText}
+                    </p>
+                  ) : rangeStartsLate ? (
+                    <p className="mt-1 text-xs text-slate-500 flex items-start gap-1">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-px text-slate-400" />
+                      Page 1 will be read as well — it carries the column header, and
+                      the pages after it do not. Its own transactions will appear in
+                      this import and are flagged as already seen.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-400">
+                      Long statements take about two seconds a page. Import one part
+                      now and the rest afterwards if you would rather not wait.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
+            {/* Real progress, not an animation: the server counts pages as it
+                finishes them and this is that count. It only appears once the
+                first reading arrives, so a fast file never flashes a bar. */}
+            {importing && progress && (
+              <div className="mb-5">
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-sm font-medium text-slate-700">
+                    {progress.state === 'saving' ? 'Saving rows' : 'Reading statement'}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                    {progress.percent}%
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary-600 transition-all duration-500 ease-out"
+                    style={{ width: `${progress.percent}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {progress.message}
+                  {progress.total_pages ? ` · ${progress.total_pages} pages` : ''}
+                  {progress.elapsed_ms >= 1000
+                    ? ` · ${Math.round(progress.elapsed_ms / 1000)}s elapsed`
+                    : ''}
+                </p>
+              </div>
+            )}
+
             <div className="flex justify-center">
-              <button onClick={handleImport} disabled={importing} className="btn-primary">
+              <button
+                onClick={handleImport}
+                disabled={importing || !!pageSpecErrorText}
+                className="btn-primary"
+              >
                 {importing ? (
                   <>
                     <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
-                    {isPdf ? 'Parsing PDF...' : 'Reading file...'} please wait
+                    {progress
+                      ? `Working… ${progress.percent}%`
+                      : (isPdf ? 'Parsing PDF...' : 'Reading file...')}
                   </>
                 ) : (
                   <><Upload className="h-4 w-4 mr-1.5" />Upload and Import</>
@@ -236,6 +348,30 @@ export default function ImportPage() {
                 </p>
               </div>
             </div>
+
+            {/* Only when part of the file was read — otherwise the whole file
+                is the obvious answer and saying so is noise. */}
+            {result.pages_parsed?.length > 0 && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-700">
+                  <span className="font-medium">
+                    Read {result.pages_parsed.length} of {result.pages_total} pages
+                  </span>
+                  {' — '}
+                  {result.header_page_added
+                    ? `page 1 (for the column header) plus ${result.pages_parsed[1]}–${result.pages_parsed[result.pages_parsed.length - 1]}.`
+                    : `pages ${result.pages_parsed[0]}–${result.pages_parsed[result.pages_parsed.length - 1]}.`}
+                  {result.pages_total > result.pages_parsed.length && (
+                    <>
+                      <br />
+                      Import the rest by uploading the same file again with a range
+                      starting at page{' '}
+                      {result.pages_parsed[result.pages_parsed.length - 1] + 1}.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
 
             {Object.keys(headers).length > 0 && (
               <div className="mt-5">

@@ -2,9 +2,16 @@ import axios from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
+// A default deadline, so a request to a backend that has stopped answering
+// fails with a sentence instead of hanging on the browser's own timeout, which
+// is minutes long and shows the user nothing at all in the meantime. Imports
+// override it — parsing a long statement legitimately takes longer than this.
+export const DEFAULT_TIMEOUT_MS = 30000
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: DEFAULT_TIMEOUT_MS,
 })
 
 api.interceptors.request.use((config) => {
@@ -30,6 +37,25 @@ api.interceptors.request.use((config) => {
  * field that actually failed.
  */
 function describeError(error) {
+  // No response at all: the request never reached the server, or the server
+  // never answered. axios reports both as the bare string "Network Error",
+  // which reads like the user did something wrong. Say what actually happened
+  // and what to do about it — a long import is the usual cause here, and the
+  // worst outcome is someone re-uploading a statement that did land.
+  if (!error.response) {
+    if (error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '')) {
+      return (
+        'The server did not respond in time. A large statement can take several ' +
+        'minutes to parse — open the Imports list to check whether it was saved ' +
+        'before uploading it again.'
+      )
+    }
+    return (
+      'Cannot reach the server. It may be restarting, or busy parsing a large ' +
+      'statement. Wait a moment and try again.'
+    )
+  }
+
   const detail = error.response?.data?.detail
 
   if (Array.isArray(detail)) {

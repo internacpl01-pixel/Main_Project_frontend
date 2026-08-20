@@ -304,7 +304,15 @@ export async function finalizeRow(rowId) {
 
 // ── Import / Upload ──────────────────────────────────────────────────────────
 
-export async function importPdf(file, save = false, bankId = null, password = '') {
+// Parsing is measured in seconds per page, so a long statement runs for
+// minutes — a 65-page one took about two and a half. The default 30s deadline
+// would abandon those uploads while the server was still working on them, so
+// the import calls get their own, set above the backend's own parse timeout so
+// that when a file really is too big the server's explanation wins the race.
+const IMPORT_TIMEOUT_MS = 300000
+
+export async function importPdf(file, save = false, bankId = null, password = '',
+                                { pages = '', background = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -313,10 +321,55 @@ export async function importPdf(file, save = false, bankId = null, password = ''
   // always accepted this field; without it an encrypted PDF fails with
   // "ENCRYPTED: This PDF is password-protected" and there was no way to answer.
   if (password) form.append('password', password)
+  // "30" reads the first thirty pages, "31-65" a range, blank the whole file.
+  if (pages) form.append('pages', pages)
+  // With background=true this resolves in milliseconds with a job id, and the
+  // parse carries on server-side — see pollImportJob.
+  if (background) form.append('background', 'true')
   const { data } = await api.post('/imports/pdf', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: IMPORT_TIMEOUT_MS,
   })
   return data
+}
+
+// One progress reading for a background import:
+// { state, percent, pages_done, total_pages, message, result, error, elapsed_ms }
+// state is queued | parsing | saving | done | failed. On done, `result` is
+// exactly what a foreground import would have returned.
+export async function fetchImportJob(jobId) {
+  const { data } = await api.get(`/imports/jobs/${jobId}`)
+  return data
+}
+
+/**
+ * Follow a background import to the end, reporting progress as it goes.
+ *
+ * Resolves with the finished result, or throws with the server's own message.
+ * A poll that fails to reach the server is ignored rather than fatal: the parse
+ * is what matters and it is still running, so one missed reading should not
+ * abandon an import that is going to succeed.
+ */
+export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
+  let misses = 0
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalMs))
+    let job
+    try {
+      job = await fetchImportJob(jobId)
+      misses = 0
+    } catch (err) {
+      if (++misses >= 10) throw err
+      continue
+    }
+    if (onProgress) onProgress(job)
+    if (job.state === 'done') return job.result
+    if (job.state === 'failed') {
+      const e = new Error(job.error || 'The import failed.')
+      e.jobFailed = true
+      throw e
+    }
+  }
 }
 
 export async function importExcel(file, save = false, bankId = null) {
@@ -326,6 +379,7 @@ export async function importExcel(file, save = false, bankId = null) {
   if (bankId) form.append('bank_id', String(bankId))
   const { data } = await api.post('/imports/excel', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: IMPORT_TIMEOUT_MS,
   })
   return data
 }
@@ -337,6 +391,7 @@ export async function importCsv(file, save = false, bankId = null) {
   if (bankId) form.append('bank_id', String(bankId))
   const { data } = await api.post('/imports/csv', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: IMPORT_TIMEOUT_MS,
   })
   return data
 }
@@ -363,6 +418,10 @@ export async function exportTransactions(format = 'csv', params = {}) {
   const { data } = await api.get('/export/transactions', {
     params: { format, ...params },
     responseType: 'blob',
+    // Rendering a large ledger to xlsx or pdf is built row by row on the
+    // server, so this belongs with the imports rather than with the quick
+    // reads the default deadline was chosen for.
+    timeout: IMPORT_TIMEOUT_MS,
   })
   return data
 }
