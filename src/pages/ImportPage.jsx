@@ -6,6 +6,7 @@ import {
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
+  Eye, EyeOff,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -18,11 +19,12 @@ import {
 // possible and what keeps a long statement from outliving the request. Excel
 // and CSV stay direct — they finish in about a second, so a job would be more
 // machinery than the work it describes.
-async function importFile(file, bankId = null, password = '', pages = '', onProgress) {
+async function importFile(file, bankId = null, password = '', pages = '',
+                          batchPages = null, onProgress) {
   const ext = file.name.split('.').pop().toLowerCase()
   if (ext === 'pdf') {
     const started = await importPdf(file, true, bankId, password,
-                                    { pages, background: true })
+                                    { pages, batchPages, background: true })
     return pollImportJob(started.job_id, onProgress)
   }
   if (ext === 'csv') return importCsv(file, true, bankId)
@@ -62,8 +64,15 @@ export default function ImportPage() {
   // persisted, never sent anywhere but /imports/pdf.
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState('')
+  // A bank's PDF password is something read off an email or an SMS — usually a
+  // date of birth or part of an account number — so being able to check what
+  // was typed is the difference between one attempt and three. Off by default,
+  // and reset with the form.
+  const [showPassword, setShowPassword] = useState(false)
   // "" = every page. A count or a range narrows it.
   const [pages, setPages] = useState('')
+  // "" leaves the server's default (20). "0" reads the file in one pass.
+  const [batchPages, setBatchPages] = useState('')
   // The last reading from the running job, or null when nothing is running.
   const [progress, setProgress] = useState(null)
   const fileInput = useRef()
@@ -98,6 +107,7 @@ export default function ImportPage() {
     setProgress(null)
     try {
       const res = await importFile(file, bankId || null, password, pages.trim(),
+                                   batchPages.trim() === '' ? null : Number(batchPages),
                                    setProgress)
       setResult(res)
       if (res.row_count > 0) toast.success(`Imported ${res.row_count} rows`)
@@ -121,6 +131,7 @@ export default function ImportPage() {
   const reset = () => {
     setFile(null); setResult(null); setImporting(false)
     setPassword(''); setPwError(''); setPages(''); setProgress(null)
+    setShowPassword(false); setBatchPages('')
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
@@ -218,15 +229,29 @@ export default function ImportPage() {
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => { setPassword(e.target.value); setPwError('') }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !importing) handleImport() }}
                       autoFocus={!!pwError}
                       autoComplete="off"
                       placeholder="Leave blank if not protected"
-                      className={`input pl-9 ${pwError ? 'border-red-300 focus:ring-red-200' : ''}`}
+                      className={`input pl-9 pr-10 ${pwError ? 'border-red-300 focus:ring-red-200' : ''}`}
                     />
+                    {password && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((s) => !s)}
+                        tabIndex={-1}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                      >
+                        {showPassword
+                          ? <EyeOff className="h-4 w-4" />
+                          : <Eye className="h-4 w-4" />}
+                      </button>
+                    )}
                   </div>
                   {pwError ? (
                     <p className="mt-1 text-xs text-red-600 flex items-start gap-1">
@@ -269,6 +294,33 @@ export default function ImportPage() {
                       now and the rest afterwards if you would rather not wait.
                     </p>
                   )}
+                </div>
+              )}
+
+              {isPdf && (
+                <div className="sm:col-span-2">
+                  <label className="label">
+                    Read in batches of{' '}
+                    <span className="text-slate-400 font-normal">
+                      (blank = 20 pages, the recommended setting)
+                    </span>
+                  </label>
+                  <input
+                    value={batchPages}
+                    onChange={(e) => setBatchPages(e.target.value.replace(/[^\d]/g, ''))}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="20"
+                    className="input"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    A long statement is read a stretch at a time and stitched back
+                    into one import. The parser picks one reading strategy for the
+                    whole document, so a few awkward pages can cost columns on
+                    every page; reading in stretches keeps that contained. Costs
+                    about 10% more time. Enter <span className="font-mono">0</span>{' '}
+                    to read the file in one pass.
+                  </p>
                 </div>
               )}
             </div>
@@ -351,7 +403,18 @@ export default function ImportPage() {
 
             {/* Only when part of the file was read — otherwise the whole file
                 is the obvious answer and saying so is noise. */}
-            {result.pages_parsed?.length > 0 && (
+            {result.batches > 1 && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-700">
+                  Read in <span className="font-medium">{result.batches} batches</span>
+                  {' '}of {result.batch_pages} pages and stitched into one import —
+                  which is what keeps the narrower columns detected on a long file.
+                </p>
+              </div>
+            )}
+
+            {result.pages_parsed?.length > 0 && result.pages_total
+              && result.pages_parsed.length < result.pages_total && (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <p className="text-xs text-slate-700">
                   <span className="font-medium">

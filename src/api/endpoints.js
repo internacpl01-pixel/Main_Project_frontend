@@ -312,7 +312,8 @@ export async function finalizeRow(rowId) {
 const IMPORT_TIMEOUT_MS = 300000
 
 export async function importPdf(file, save = false, bankId = null, password = '',
-                                { pages = '', background = false } = {}) {
+                                { pages = '', background = false,
+                                  batchPages = null } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -323,6 +324,11 @@ export async function importPdf(file, save = false, bankId = null, password = ''
   if (password) form.append('password', password)
   // "30" reads the first thirty pages, "31-65" a range, blank the whole file.
   if (pages) form.append('pages', pages)
+  // Read long files in stretches of this many pages. null leaves it to the
+  // server's default; 0 is a deliberate "one pass", so it must still be sent.
+  if (batchPages !== null && batchPages !== '') {
+    form.append('batch_pages', String(batchPages))
+  }
   // With background=true this resolves in milliseconds with a job id, and the
   // parse carries on server-side — see pollImportJob.
   if (background) form.append('background', 'true')

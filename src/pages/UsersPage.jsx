@@ -77,12 +77,33 @@ export default function UsersPage() {
     }
   }
 
+  // With a company code the prefix is furniture, not something to type: it is
+  // the same for every account here and getting it wrong is the one way this
+  // form can be refused. So the box holds only the part after it, and these two
+  // put the whole name back together.
+  //
+  // A company registered before codes existed has none, and its accounts are
+  // not held to the rule — there the whole username is typed, as before.
+  const codePrefix = user?.companyCode ? `${user.companyCode}-` : ''
+
+  const composeUsername = (typed) =>
+    codePrefix ? `${codePrefix}${typed.trim()}` : typed.trim()
+
+  // Someone who pastes or types the full name should not end up with
+  // "amb-amb-ravi" — the prefix is already on screen, so a leading copy of it
+  // is a duplicate rather than part of the name.
+  const stripPrefix = (raw) =>
+    codePrefix && raw.toLowerCase().startsWith(codePrefix.toLowerCase())
+      ? raw.slice(codePrefix.length)
+      : raw
+
   const openCreate = () => {
     setForm({ ...emptyForm, role: creatableRoles[creatableRoles.length - 1] || 'staff' })
     setModalOpen(true)
   }
 
   const handleCreate = async () => {
+    const newUsername = composeUsername(form.username)
     if (!form.username.trim() || !form.password) {
       toast.error('Username and password are required')
       return
@@ -90,11 +111,11 @@ export default function UsersPage() {
     setSaving(true)
     try {
       await createUser({
-        username: form.username.trim(),
+        username: newUsername,
         password: form.password,
         role: form.role,
       })
-      toast.success(`${ROLE_LABELS[form.role]} '${form.username.trim()}' created`)
+      toast.success(`${ROLE_LABELS[form.role]} '${newUsername}' created`)
       setModalOpen(false)
       load()
     } catch (err) {
@@ -328,21 +349,45 @@ export default function UsersPage() {
         <div className="space-y-4">
           <div>
             <label className="label">Username</label>
-            <input
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className={`input ${user?.companyCode ? 'font-mono' : ''}`}
-              placeholder={user?.companyCode ? `${user.companyCode}-ravi` : 'At least 3 characters'}
-              autoComplete="off"
-            />
-            {/* The rule is enforced server-side in services/accounts.py; this is
-                here so it is read before the name is typed rather than after it
-                is refused. Companies registered before codes existed have none,
-                and their accounts are not held to it. */}
-            {user?.companyCode && (
+            {codePrefix ? (
+              /* The prefix is shown as part of the field rather than typed into
+                 it. The wrapper carries the border and the focus ring so the
+                 two elements read as one input; the inner box is borderless. */
+              <div className="flex w-full rounded-lg border border-slate-300 shadow-sm transition-colors focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 overflow-hidden">
+                <span className="flex items-center pl-3 pr-2 bg-slate-50 border-r border-slate-200 text-sm font-mono text-slate-500 select-none">
+                  {codePrefix}
+                </span>
+                <input
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: stripPrefix(e.target.value) })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleCreate() }}
+                  className="flex-1 min-w-0 px-3 py-2 text-sm font-mono placeholder-slate-400 focus:outline-none"
+                  placeholder="ravi"
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <input
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                className="input"
+                placeholder="At least 3 characters"
+                autoComplete="off"
+              />
+            )}
+            {/* The rule is enforced server-side in services/accounts.py. Showing
+                the finished name is what makes the split field honest — what is
+                created is one username, not two halves. */}
+            {codePrefix && (
               <p className="mt-1 text-xs text-slate-500">
-                Must start with <span className="font-mono">{user.companyCode}-</span>,
-                the code for {user.companyName || 'this company'}.
+                Will be created as{' '}
+                <span className="font-mono text-slate-700">
+                  {composeUsername(form.username) || codePrefix}
+                </span>
+                {' — '}
+                <span className="font-mono">{user.companyCode}</span> is the code for{' '}
+                {user.companyName || 'this company'}.
               </p>
             )}
           </div>
