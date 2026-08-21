@@ -5,6 +5,7 @@ import {
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
+  Highlight, matchesNumber,
 } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -52,6 +53,10 @@ export default function StagingPage() {
   // is a sequential scan per keystroke.
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  // The words the server actually matched on, which is what gets marked up in
+  // the cells. Its own state rather than a split of `query`, so the highlight
+  // always describes the rows on screen instead of the box being typed in.
+  const [terms, setTerms] = useState([])
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
   // Rows matching the current tab and search. summary.staged_total is the
@@ -119,6 +124,7 @@ export default function StagingPage() {
       setColumns(data.columns || [])
       setRows(data.rows || [])
       setSummary(data.summary || null)
+      setTerms(data.search_terms || [])
       setTotal(data.total ?? 0)
     } catch (err) {
       toast.error(err.message)
@@ -227,18 +233,31 @@ export default function StagingPage() {
   // One cell. Numbers get thousands separators and right alignment, the DR/CR
   // marker keeps its colour coding, everything else prints as text — decided by
   // the column's declared type and value, never by a hardcoded column name.
+  //
+  // Search hits are marked up here rather than at the table, because what a
+  // match looks like depends on how the cell is drawn. Text can have the words
+  // themselves highlighted. A number cannot: it is printed 1,50,000.00 and
+  // stored 150000.00, so the whole figure is marked when it matches. The DR/CR
+  // badge already carries a background colour, and a second one inside it just
+  // reads as a rendering fault, so it gets a ring instead.
   const renderCell = (row, c) => {
     const val = row[c.name]
     if (val === null || val === undefined || val === '') return '—'
-    if (isNumeric(c)) return fmt(val)
+    if (isNumeric(c)) {
+      const shown = fmt(val)
+      return matchesNumber(val, terms)
+        ? <mark className="rounded-sm bg-amber-200 px-0.5 text-inherit">{shown}</mark>
+        : shown
+    }
     if (val === 'CR' || val === 'DR') {
+      const hit = terms.some((t) => String(t).toLowerCase() === val.toLowerCase())
       return (
         <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
           val === 'CR' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-        }`}>{val}</span>
+        } ${hit ? 'ring-2 ring-amber-400' : ''}`}>{val}</span>
       )
     }
-    return String(val)
+    return <Highlight text={val} terms={terms} />
   }
 
   // Whichever data columns this row actually has a value in. Used by the
@@ -328,14 +347,27 @@ export default function StagingPage() {
         </div>
 
         {/* Searched in SQL, not here. The browser only ever holds one page, so
-            filtering client-side could never find a match on any other page. */}
+            filtering client-side could never find a match on any other page —
+            this looks at every staged row and pages the matches. */}
         <div className="w-full sm:w-80">
           <SearchInput
             value={search}
             onChange={setSearch}
             onClear={() => setSearch('')}
-            placeholder="Search every column..."
+            placeholder="Search every column, every page..."
           />
+          {/* Says outright that the whole table was searched, not the page.
+              Without it there is no way to tell a search that found nothing
+              from one that only looked at the fifty rows in front of you. */}
+          {query && !loading && (
+            <p className="mt-1 px-1 text-xs text-slate-500">
+              {total === 0
+                ? `No ${filter === 'all' ? '' : `${filter} `}row matches`
+                : `${total.toLocaleString('en-IN')} ${total === 1 ? 'row matches' : 'rows match'}`}
+              {' across every page'}
+              {terms.length > 1 ? ' · all words must appear' : ''}
+            </p>
+          )}
         </div>
       </div>
 
@@ -430,9 +462,13 @@ export default function StagingPage() {
                           <span className="text-xs text-slate-300">—</span>
                         ) : (
                           <div className="flex flex-wrap gap-1">
+                            {/* Marked up too: the search reaches into the
+                                joined master names, so a row can be here
+                                because of its head or beneficiary and nothing
+                                in the data columns will show why. */}
                             {tags.map((t) => (
                               <span key={t} className="inline-flex px-2 py-0.5 rounded bg-slate-100 text-xs text-slate-600">
-                                {t}
+                                <Highlight text={t} terms={terms} />
                               </span>
                             ))}
                           </div>

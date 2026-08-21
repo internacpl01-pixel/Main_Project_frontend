@@ -184,6 +184,52 @@ export function Pagination({ page, limit, total, onPage, onLimit }) {
 // `list` is optional and wires the input to a <datalist> the caller renders,
 // for the cases where the search term is one of a known set rather than free
 // text.
+// Mark up every occurrence of `terms` inside `text`.
+//
+// The terms come from the server, which is what decided the row matched in the
+// first place — re-deriving them from the query string here would give two
+// implementations of "what counts as a match" and they would disagree the first
+// time either side changed.
+//
+// Longest first: with "1500" and "150" both live, splitting on the shorter one
+// first would cut the longer match in half and mark only part of it.
+export function Highlight({ text, terms }) {
+  const s = text === null || text === undefined ? '' : String(text)
+  if (!s) return s
+  const list = (terms || []).filter(Boolean)
+  if (!list.length) return s
+
+  const pattern = list
+    .map(String)
+    .sort((a, b) => b.length - a.length)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+
+  // One capture group, so split() puts the matches at the odd indices.
+  const parts = s.split(new RegExp(`(${pattern})`, 'gi'))
+  if (parts.length === 1) return s
+  return parts.map((part, i) =>
+    i % 2 === 1
+      ? <mark key={i} className="rounded-sm bg-amber-200 px-0.5 text-inherit">{part}</mark>
+      : part
+  )
+}
+
+// Does `value` contain one of the terms once digit grouping is out of the way?
+//
+// A number is printed with separators (1,50,000.00) and stored without them, so
+// a term will never line up character-for-character with what is on screen —
+// this is the one place the displayed text and the searched text differ. Both
+// sides lose their commas before comparing, and the caller marks the whole
+// figure rather than part of it: half a number highlighted reads as a typo.
+export function matchesNumber(value, terms) {
+  const plain = String(value).replace(/,/g, '').toLowerCase()
+  return (terms || []).some((t) => {
+    const q = String(t).replace(/,/g, '').toLowerCase()
+    return q && plain.includes(q)
+  })
+}
+
 export function SearchInput({ value, onChange, placeholder, onClear, list }) {
   return (
     <div className="relative">
