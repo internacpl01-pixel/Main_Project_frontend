@@ -20,6 +20,18 @@ export default {
           850: '#1e293b',
         }
       },
+      // Used by the super admin console's company stack. translateY only — the
+      // panes carry their own 3D placement on the element inside this one, so
+      // an animation that wrote a full transform here would erase it.
+      keyframes: {
+        float: {
+          '0%, 100%': { transform: 'translateY(0px)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+      },
+      animation: {
+        float: 'float 7s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

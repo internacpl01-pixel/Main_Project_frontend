@@ -172,6 +172,93 @@ function StatCard({ icon: Icon, label, value, hint, tone = 'slate', onClick }) {
   )
 }
 
+// The hero's 3D piece: the tenant registry as a fanned deck of cards.
+//
+// Not decoration bolted on — schema-per-tenant IS a stack of separate, sealed
+// boxes, so the picture says what the role is. The cards carry the three newest
+// companies, real code and real account count, which is why it earns the space:
+// a shape that means nothing would just be a screensaver in a work screen.
+//
+// Depth is built the way depth is actually built in CSS: perspective on the
+// frame, transform-style: preserve-3d on the scene so children keep their own
+// Z, and each card placed on its own translateZ plane. The two rotations come
+// from the pointer as inherited custom properties, multiplied here so the deck
+// swings noticeably further than anything else on the band.
+//
+// The float lives on a wrapper, not the card. An animation writing `transform`
+// on the card itself would overwrite its 3D placement and flatten the stack.
+const PLANES = [
+  { z: 70, x: 0, y: 0, opacity: 1, delay: '0s' },
+  { z: 30, x: 26, y: 20, opacity: 0.72, delay: '-2.3s' },
+  { z: -10, x: 52, y: 40, opacity: 0.45, delay: '-4.6s' },
+]
+
+function CompanyStack({ companies }) {
+  return (
+    <div
+      aria-hidden
+      // xl, not lg: the copy is capped at 36rem and the deck needs 19rem, which
+      // does not fit beside it once the sidebar takes 15rem out of a 1024px
+      // viewport. Below that the band is text only.
+      className="pointer-events-none absolute right-10 top-1/2 hidden -translate-y-1/2 [perspective:1200px] xl:block"
+    >
+      <div
+        className="relative h-48 w-[19rem] [transform-style:preserve-3d]
+          [transform:rotateX(calc(var(--rx,0deg)*2))_rotateY(calc(-14deg_+_var(--ry,0deg)*2.4))]
+          transition-transform duration-300 ease-out"
+      >
+        {PLANES.map((p, i) => {
+          const c = companies?.[i]
+          return (
+            <div
+              key={i}
+              className="absolute inset-0 [transform-style:preserve-3d] motion-safe:animate-float"
+              style={{ animationDelay: p.delay }}
+            >
+              <div
+                className="h-32 w-64 rounded-2xl border border-white/15 bg-white/[0.07] p-4 shadow-2xl shadow-black/40 backdrop-blur-sm"
+                style={{
+                  transform: `translate3d(${p.x}px, ${p.y}px, ${p.z}px)`,
+                  opacity: p.opacity,
+                }}
+              >
+                {/* A card with no company behind it stays an empty plate. A
+                    plausible-looking placeholder name would be a lie sitting
+                    in the middle of a screen whose other numbers are real. */}
+                {c ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-white/90">
+                        {c.code || '—'}
+                      </span>
+                      <Building2 className="h-3.5 w-3.5 text-white/40" />
+                    </div>
+                    <p className="mt-3 truncate text-sm font-medium text-white/95">
+                      {c.name}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-white/50">
+                      {c.user_count === 1 ? '1 account' : `${c.user_count} accounts`}
+                    </p>
+                    {/* A sealed box, drawn as one: the tenant's own schema. */}
+                    <p className="mt-2 truncate font-mono text-[10px] text-white/30">
+                      {c.schema_name}
+                    </p>
+                  </>
+                ) : (
+                  <div className="flex h-full flex-col justify-center gap-2">
+                    <div className="h-2 w-16 rounded bg-white/10" />
+                    <div className="h-2 w-28 rounded bg-white/[0.07]" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ActionTile({ icon: Icon, title, description, onClick, primary }) {
   const tilt = useTilt(7)
   return (
@@ -238,14 +325,21 @@ export default function SuperAdminHome({ user, onChangePassword }) {
 
   const greeting = useMemo(() => greetingFor(new Date()), [])
   const loading = companies === null && !error
+  // Set on the hero; the stack and the copy both read them at their own depth.
+  const heroTilt = useTilt(5)
 
   return (
     <div className="space-y-6">
-      {/* Hero. The layered translateZ panes are the depth: a plate behind the
-          text, lit by two soft radial washes, so the band reads as a surface
-          rather than a coloured rectangle. */}
+      {/* Hero. The pointer sets --rx/--ry on this element and every layer below
+          inherits them, each applying its own multiple — so one cursor drives a
+          whole parallax instead of each piece tracking the mouse separately. */}
       <div className="[perspective:1400px]">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800 px-6 py-8 sm:px-10 sm:py-10 [transform-style:preserve-3d]">
+        <div
+          ref={heroTilt.ref}
+          onPointerMove={heroTilt.onPointerMove}
+          onPointerLeave={heroTilt.onPointerLeave}
+          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800 px-6 py-8 sm:px-10 sm:py-10 [transform-style:preserve-3d]"
+        >
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0 opacity-70"
@@ -255,11 +349,30 @@ export default function SuperAdminHome({ user, onChangePassword }) {
                 'radial-gradient(50% 80% at 95% 100%, rgba(59,130,246,0.22), transparent 65%)',
             }}
           />
+          {/* A faint floor grid, masked to fade out. It is what gives the cards
+              something to sit above — depth needs a ground plane to read
+              against, and without one they look like stickers. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.13]"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),' +
+                'linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+              backgroundSize: '46px 46px',
+              maskImage: 'radial-gradient(70% 100% at 80% 60%, black, transparent 75%)',
+              WebkitMaskImage: 'radial-gradient(70% 100% at 80% 60%, black, transparent 75%)',
+            }}
+          />
           <div
             aria-hidden
             className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full border border-white/10 [transform:translateZ(-40px)]"
           />
-          <div className="relative [transform:translateZ(40px)]">
+
+          <CompanyStack companies={stats.recent} />
+
+          {/* Capped width so the copy never runs under the stack. */}
+          <div className="relative max-w-xl [transform:translateZ(40px)_rotateY(calc(var(--ry,0deg)*0.35))]">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-200 ring-1 ring-inset ring-white/15">
               <ServerCog className="h-3 w-3" />
               Super admin console
@@ -267,11 +380,26 @@ export default function SuperAdminHome({ user, onChangePassword }) {
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
               {greeting}, {user?.username}.
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+            <p className="mt-2 text-sm leading-relaxed text-slate-300">
               You administer the companies on this install. Their ledgers, imports and
               staff belong to their own people — which is why no company data appears
               here, and why nothing is missing from your account.
             </p>
+            {stats.total > 0 && (
+              <p className="mt-4 text-xs text-slate-400">
+                <span className="font-medium text-slate-200">{stats.active}</span> active
+                {' · '}
+                <span className="font-medium text-slate-200">{NUMBER.format(stats.accounts)}</span> accounts
+                {stats.empty.length > 0 && (
+                  <>
+                    {' · '}
+                    <span className="font-medium text-amber-300">
+                      {stats.empty.length} awaiting an admin
+                    </span>
+                  </>
+                )}
+              </p>
+            )}
           </div>
         </div>
       </div>
