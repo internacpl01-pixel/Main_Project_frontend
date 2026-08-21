@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
+import SuperAdminHome from '../pages/SuperAdminHome.jsx'
 
 // Every route in App.jsx has an entry here. Projects and Master Data were
 // previously reachable only through links buried on the dashboard, which meant
@@ -211,6 +212,11 @@ export default function Layout() {
         <main className="p-4 lg:p-6">
           {hasCompany || !needsCompany ? (
             <Outlet key={user.schema} />
+          ) : isSuperAdmin ? (
+            // Belonging to no company is this role's design, not a fault, so it
+            // gets a console rather than the notice below — which was written
+            // for a company user and told the super admin to ask a super admin.
+            <SuperAdminHome user={user} onChangePassword={() => setPasswordOpen(true)} />
           ) : (
             <div className="card p-8 text-center">
               <p className="text-sm text-slate-600">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   fetchCompanies, registerCompany, updateCompany, fetchClonePreview,
   fetchDeleteCheck, deleteCompany, addCompanyAdmin,
@@ -136,6 +137,18 @@ export default function CompaniesPage() {
     setStep(1)
     setModalOpen(true)
   }
+
+  // "Register a company" on the super admin's home lands here with the form
+  // already open, rather than on a page where the button has to be found again.
+  // The history entry is replaced on the way in, so a refresh or a Back-then-
+  // Forward does not reopen a modal the user has since closed.
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!location.state?.register) return
+    openRegister()
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state?.register])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNext = () => {
     const name = form.name.trim()
