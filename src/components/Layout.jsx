@@ -21,7 +21,11 @@ import SuperAdminHome from '../pages/SuperAdminHome.jsx'
 // company schema and the API refuses them company data, so every other item
 // would be a link to a 403.
 const NAV = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  // companyScoped: false because '/' works without a company for a super
+  // admin too — Layout swaps the company dashboard for their console. Without
+  // this the filter below removed it, and a super admin who opened Companies
+  // had no way back to their own home page except the browser's Back button.
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true, companyScoped: false },
   { to: '/projects', icon: FolderKanban, label: 'Projects' },
   { to: '/master-data', icon: Database, label: 'Master Data' },
   { to: '/custom-fields', icon: Columns3, label: 'Custom Fields' },
@@ -79,10 +83,18 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-60 bg-white border-r border-slate-200 transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between h-14 px-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
+          {/* The brand is the way home from anywhere, which is what people
+              already try first. It was a plain div, so clicking it did nothing
+              on every page in the app. */}
+          <NavLink
+            to="/"
+            onClick={() => setSidebarOpen(false)}
+            title="Go to the dashboard"
+            className="flex items-center gap-2 rounded-lg -mx-1 px-1 py-1 transition-colors hover:bg-slate-50"
+          >
             <div className="h-8 w-8 rounded-lg bg-primary-600 text-white flex items-center justify-center text-sm font-bold">L</div>
             <span className="font-semibold text-slate-900">Ledger</span>
-          </div>
+          </NavLink>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 rounded hover:bg-slate-100 text-slate-400">
             <X className="h-4 w-4" />
           </button>
@@ -138,7 +150,10 @@ export default function Layout() {
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 rounded hover:bg-slate-100 text-slate-500">
                 <Menu className="h-5 w-5" />
               </button>
-              <h1 className="text-sm font-medium text-slate-700 lg:hidden">Ledger</h1>
+              {/* Same on mobile, where the sidebar brand is off-screen. */}
+              <NavLink to="/" className="text-sm font-medium text-slate-700 lg:hidden">
+                Ledger
+              </NavLink>
               {/* Everyone bound to a company sees which one, next to their name.
                   A super admin is bound to none — they administer companies from
                   the Companies page — so they get a plain marker instead. */}
