@@ -21,7 +21,7 @@ const PICKERS = [
   { key: 'project_id',      source: 'projects',    label: 'Project',     hint: 'Which project this transaction belongs to' },
   { key: 'head_id',         master: 'head',        label: 'Head',        hint: 'Your own expense/income category' },
   { key: 'rera_head_id',    master: 'rera_head',   label: 'RERA Head',   hint: 'Category as reported under RERA' },
-  { key: 'idw_head_id',     master: 'idw_head',    label: 'IDW Head',    hint: 'Category as reported under IDW' },
+  { key: 'idw_head_id',     master: 'idw_head',    label: 'TCP Head',    hint: 'Category as reported under TCP' },
   { key: 'beneficiary_id',  master: 'beneficiary', label: 'Beneficiary', hint: 'Who was paid, or who paid you' },
 ]
 
@@ -150,7 +150,7 @@ export default function StagingPage() {
 
   const handleClassify = async () => {
     if (!HEAD_KEYS.some((k) => form[k])) {
-      toast.error('Pick at least one of Head, RERA Head or IDW Head.')
+      toast.error('Pick at least one of Head, RERA Head or TCP Head.')
       return
     }
     setSaving(true)
@@ -322,7 +322,7 @@ export default function StagingPage() {
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <strong className="font-medium">No heads defined yet.</strong>{' '}
           Rows cannot be classified until this company has at least one Head, RERA Head
-          or IDW Head. Add them under Master Data.
+          or TCP Head. Add them under Master Data.
         </div>
       )}
 
