@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 
 export function Spinner({ size = 'md', className = '' }) {
   const sizeClasses = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
@@ -184,6 +185,64 @@ export function Pagination({ page, limit, total, onPage, onLimit }) {
 // `list` is optional and wires the input to a <datalist> the caller renders,
 // for the cases where the search term is one of a known set rather than free
 // text.
+// A password field that can be read back.
+//
+// Every password on this app is one someone is typing for the first time — a
+// new user's, a reset, a bank's PDF password read off an SMS. There is nothing
+// remembered to fall back on when the dots do not match what was meant, so the
+// choice is between checking it and finding out at the next screen.
+//
+// Visibility is this component's own state, and it snaps back to hidden the
+// moment the field is emptied. That covers both a form being reset and the user
+// clearing it by hand, so a revealed password never carries over into the next
+// thing typed here. The button only exists once there is something to reveal.
+export function PasswordInput({
+  value, onChange, placeholder, autoComplete = 'new-password', autoFocus,
+  onKeyDown, icon, invalid, required, className = '',
+}) {
+  const [show, setShow] = useState(false)
+  useEffect(() => { if (!value) setShow(false) }, [value])
+
+  return (
+    <div className="relative">
+      {icon && (
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          {icon}
+        </span>
+      )}
+      <input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        // Native form validation, for the one place this sits inside a <form>
+        // and submit is expected to stop on an empty field.
+        required={required}
+        placeholder={placeholder}
+        className={`input ${icon ? 'pl-9' : ''} pr-10 ${
+          invalid ? 'border-red-300 focus:ring-red-200' : ''
+        } ${className}`}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          // Out of the tab order: tabbing off a password field goes to the next
+          // field, not to a button that shows what was just typed.
+          tabIndex={-1}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          title={show ? 'Hide password' : 'Show password'}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // Mark up every occurrence of `terms` inside `text`.
 //
 // The terms come from the server, which is what decided the row matched in the

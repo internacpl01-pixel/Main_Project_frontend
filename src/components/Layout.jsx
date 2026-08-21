@@ -3,9 +3,10 @@ import { useAuth, MANAGER, SUPER_ADMIN } from '../context/AuthContext.jsx'
 import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
-  FolderKanban, Database, History
+  FolderKanban, Database, History, KeyRound
 } from 'lucide-react'
 import { useState } from 'react'
+import ChangePasswordDialog from './ChangePasswordDialog.jsx'
 
 // Every route in App.jsx has an entry here. Projects and Master Data were
 // previously reachable only through links buried on the dashboard, which meant
@@ -37,6 +38,7 @@ const NAV = [
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
   const { user, signOut, hasLevel, isSuperAdmin } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -175,6 +177,18 @@ export default function Layout() {
                       <p className="text-sm font-medium text-slate-900">{user?.username}</p>
                       <p className="text-xs text-slate-500">{user?.roleLabel || user?.role}</p>
                     </div>
+                    {/* Here rather than on the Users page because that page
+                        edits accounts by company, and a super admin belongs to
+                        none — theirs would be the one account it could never
+                        reach. Everyone gets it: the endpoint changes whoever is
+                        in the token, so it is the same control for every role. */}
+                    <button
+                      onClick={() => { setProfileOpen(false); setPasswordOpen(true) }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      <KeyRound className="h-4 w-4 text-slate-400" />
+                      Change password
+                    </button>
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
@@ -207,6 +221,15 @@ export default function Layout() {
           )}
         </main>
       </div>
+
+      <ChangePasswordDialog
+        isOpen={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+        // Straight to the login screen: the new password is the one that works
+        // now, and staying signed in on the old token invites the question of
+        // which one is current.
+        onChanged={() => { setPasswordOpen(false); handleLogout() }}
+      />
     </div>
   )
 }

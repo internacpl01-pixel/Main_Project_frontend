@@ -3,7 +3,9 @@ import {
   fetchUsers, createUser, updateUser, updateUserRole, deleteUser,
   fetchUserProjects, setUserProjects,
 } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth, LEVELS, ROLE_LABELS, COMPANY_ADMIN } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -393,14 +395,17 @@ export default function UsersPage() {
           </div>
           <div>
             <label className="label">Password</label>
-            <input
-              type="password"
+            <PasswordInput
               value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="input"
+              onChange={(v) => setForm({ ...form, password: v })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleCreate() }}
               placeholder="At least 4 characters"
-              autoComplete="new-password"
             />
+            {/* Whoever creates the account has to pass it on, so it is worth
+                saying plainly that this is the only time it is readable. */}
+            <p className="mt-1 text-xs text-slate-400">
+              Stored hashed — it cannot be read back later, only replaced.
+            </p>
           </div>
           <div>
             <label className="label">Role</label>
@@ -440,13 +445,11 @@ export default function UsersPage() {
           </div>
           <div>
             <label className="label">New Password</label>
-            <input
-              type="password"
+            <PasswordInput
               value={editForm.password}
-              onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-              className="input"
+              onChange={(v) => setEditForm({ ...editForm, password: v })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleEdit() }}
               placeholder="Leave blank to keep the current one"
-              autoComplete="new-password"
             />
           </div>
           <div className="flex justify-end gap-3 pt-2">

@@ -19,6 +19,18 @@ export async function getMe() {
   return data
 }
 
+// Change the signed-in account's own password. Works for every role, including
+// a super admin — whose row lives in admin.users with no company, so the Users
+// page cannot reach it. 400 if the current password is wrong or the new one is
+// too short; the server's sentence is what gets shown.
+export async function changePassword(currentPassword, newPassword) {
+  const { data } = await api.post('/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
+  return data
+}
+
 // POST /auth/switch-company no longer exists. A super admin administers
 // companies and does not work inside one, so there is no company for them to
 // switch into — see the note in backend/routers/auth.py.

@@ -3,7 +3,9 @@ import {
   fetchCompanies, registerCompany, updateCompany, fetchClonePreview,
   fetchDeleteCheck, deleteCompany, addCompanyAdmin,
 } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { Plus, Power, PowerOff, Pencil, Trash2, UserPlus } from 'lucide-react'
@@ -658,14 +660,16 @@ export default function CompaniesPage() {
                 </div>
                 <div>
                   <label className="label">Password</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={form.admin_password}
-                    onChange={(e) => setForm({ ...form, admin_password: e.target.value })}
-                    className="input"
+                    onChange={(v) => setForm({ ...form, admin_password: v })}
                     placeholder="At least 4 characters"
-                    autoComplete="new-password"
                   />
+                  {/* This password has to be handed to someone else, and this
+                      is the only moment it is readable — it is stored hashed. */}
+                  <p className="mt-1 text-xs text-slate-400">
+                    Give this to the company admin. It cannot be read back later.
+                  </p>
                 </div>
               </div>
             </div>
@@ -741,14 +745,15 @@ export default function CompaniesPage() {
           </div>
           <div>
             <label className="label">Password</label>
-            <input
-              type="password"
+            <PasswordInput
               value={adminForm.password}
-              onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
-              className="input"
+              onChange={(v) => setAdminForm({ ...adminForm, password: v })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleAddAdmin() }}
               placeholder="At least 4 characters"
-              autoComplete="new-password"
             />
+            <p className="mt-1 text-xs text-slate-400">
+              Give this to the company admin. It cannot be read back later.
+            </p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setAddingAdmin(null)} className="btn-secondary text-sm">Cancel</button>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { Lock, User, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { Spinner } from '../components/UI.jsx'
+import { Spinner, PasswordInput } from '../components/UI.jsx'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -69,19 +69,17 @@ export default function LoginPage() {
 
               <div>
                 <label className="label">Password</label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Lock className="h-4 w-4 text-slate-400" />
-                  </div>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="input pl-9"
-                    placeholder="Enter password"
-                    required
-                  />
-                </div>
+                {/* current-password, not the component's new-password default:
+                    this is the one field where a password manager should offer
+                    what it already has rather than suggest a new one. */}
+                <PasswordInput
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete="current-password"
+                  icon={<Lock className="h-4 w-4" />}
+                  placeholder="Enter password"
+                  required
+                />
               </div>
 
               <button

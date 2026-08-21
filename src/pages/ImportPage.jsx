@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, fetchMasterData, pollImportJob,
 } from '../api/endpoints.js'
+import { PasswordInput } from '../components/UI.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Eye, EyeOff,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -64,11 +64,6 @@ export default function ImportPage() {
   // persisted, never sent anywhere but /imports/pdf.
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState('')
-  // A bank's PDF password is something read off an email or an SMS — usually a
-  // date of birth or part of an account number — so being able to check what
-  // was typed is the difference between one attempt and three. Off by default,
-  // and reset with the form.
-  const [showPassword, setShowPassword] = useState(false)
   // "" = every page. A count or a range narrows it.
   const [pages, setPages] = useState('')
   // "" leaves the server's default (20). "0" reads the file in one pass.
@@ -130,8 +125,10 @@ export default function ImportPage() {
 
   const reset = () => {
     setFile(null); setResult(null); setImporting(false)
+    // Clearing the password is what re-hides it — PasswordInput drops back to
+    // hidden whenever its value goes empty, so there is no separate flag here.
     setPassword(''); setPwError(''); setPages(''); setProgress(null)
-    setShowPassword(false); setBatchPages('')
+    setBatchPages('')
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
@@ -226,33 +223,16 @@ export default function ImportPage() {
                   <label className="label">
                     PDF Password <span className="text-slate-400 font-normal">(if protected)</span>
                   </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); setPwError('') }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !importing) handleImport() }}
-                      autoFocus={!!pwError}
-                      autoComplete="off"
-                      placeholder="Leave blank if not protected"
-                      className={`input pl-9 pr-10 ${pwError ? 'border-red-300 focus:ring-red-200' : ''}`}
-                    />
-                    {password && (
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((s) => !s)}
-                        tabIndex={-1}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        title={showPassword ? 'Hide password' : 'Show password'}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                      >
-                        {showPassword
-                          ? <EyeOff className="h-4 w-4" />
-                          : <Eye className="h-4 w-4" />}
-                      </button>
-                    )}
-                  </div>
+                  <PasswordInput
+                    value={password}
+                    onChange={(v) => { setPassword(v); setPwError('') }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !importing) handleImport() }}
+                    autoFocus={!!pwError}
+                    autoComplete="off"
+                    invalid={!!pwError}
+                    icon={<Lock className="h-4 w-4" />}
+                    placeholder="Leave blank if not protected"
+                  />
                   {pwError ? (
                     <p className="mt-1 text-xs text-red-600 flex items-start gap-1">
                       <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />{pwError}
