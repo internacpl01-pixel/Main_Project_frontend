@@ -340,9 +340,16 @@ export async function importPdf(file, save = false, bankId = null, password = ''
 }
 
 // One progress reading for a background import:
-// { state, percent, pages_done, total_pages, message, result, error, elapsed_ms }
+// { state, percent, overall_percent, batch_index, batch_total, batch_label,
+//   batches_done, pages_done, total_pages, message, result, error, elapsed_ms }
 // state is queued | parsing | saving | done | failed. On done, `result` is
 // exactly what a foreground import would have returned.
+//
+// `percent` is THIS BATCH, and restarts at zero on each one — a batched import
+// is several parses and a bar that spans all of them barely moves. The
+// whole-file figure is `overall_percent`, and `batches_done` is one entry per
+// finished batch so the screen can keep showing what is already done.
+// batch_index 0 is the one-page header probe, which is not a numbered batch.
 export async function fetchImportJob(jobId) {
   const { data } = await api.get(`/imports/jobs/${jobId}`)
   return data

@@ -327,12 +327,22 @@ export default function ImportPage() {
 
             {/* Real progress, not an animation: the server counts pages as it
                 finishes them and this is that count. It only appears once the
-                first reading arrives, so a fast file never flashes a bar. */}
+                first reading arrives, so a fast file never flashes a bar.
+
+                A batched import gets a bar PER BATCH, restarting at zero for
+                each one. One bar spread over the whole file barely moves for
+                minutes at a time, which reads as a hang; a bar per batch moves
+                at a visible rate and the finished batches stay listed below it,
+                so nothing about where the import has got to is lost. */}
             {importing && progress && (
               <div className="mb-5">
                 <div className="flex items-baseline justify-between mb-1.5">
                   <span className="text-sm font-medium text-slate-700">
-                    {progress.state === 'saving' ? 'Saving rows' : 'Reading statement'}
+                    {progress.state === 'saving'
+                      ? 'Saving rows'
+                      : progress.batch_total > 1 && progress.batch_index >= 1
+                        ? `Batch ${progress.batch_index} of ${progress.batch_total}`
+                        : 'Reading statement'}
                   </span>
                   <span className="text-sm font-semibold text-slate-900 tabular-nums">
                     {progress.percent}%
@@ -350,7 +360,22 @@ export default function ImportPage() {
                   {progress.elapsed_ms >= 1000
                     ? ` · ${Math.round(progress.elapsed_ms / 1000)}s elapsed`
                     : ''}
+                  {progress.batch_total > 1
+                    ? ` · ${progress.overall_percent}% of the file`
+                    : ''}
                 </p>
+                {progress.batch_total > 1 && progress.batches_done?.length > 0 && (
+                  <ul className="mt-2 space-y-0.5">
+                    {progress.batches_done.map((b) => (
+                      <li key={b.index}
+                          className="flex items-center text-xs text-emerald-700">
+                        <CheckCircle className="mr-1.5 h-3 w-3 shrink-0" />
+                        Batch {b.index} of {b.total} completed · {b.label} ·{' '}
+                        {b.rows} rows
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -364,7 +389,9 @@ export default function ImportPage() {
                   <>
                     <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
                     {progress
-                      ? `Working… ${progress.percent}%`
+                      ? (progress.batch_total > 1 && progress.batch_index >= 1
+                          ? `Batch ${progress.batch_index}/${progress.batch_total} · ${progress.percent}%`
+                          : `Working… ${progress.percent}%`)
                       : (isPdf ? 'Parsing PDF...' : 'Reading file...')}
                   </>
                 ) : (
