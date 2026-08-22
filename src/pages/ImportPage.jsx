@@ -295,10 +295,9 @@ export default function ImportPage() {
                   />
                   <p className="mt-1 text-xs text-slate-400">
                     A long statement is read a stretch at a time and stitched back
-                    into one import. The parser picks one reading strategy for the
-                    whole document, so a few awkward pages can cost columns on
-                    every page; reading in stretches keeps that contained. Costs
-                    about 10% more time. Enter <span className="font-mono">0</span>{' '}
+                    into one import. This keeps memory flat however long the file
+                    is, and the progress bar reports each stretch as it finishes.
+                    Costs about 10% more time. Enter <span className="font-mono">0</span>{' '}
                     to read the file in one pass.
                   </p>
                 </div>
