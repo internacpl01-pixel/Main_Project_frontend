@@ -48,6 +48,9 @@ export default function MasterDataPage() {
   const [importFile, setImportFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [onDuplicate, setOnDuplicate] = useState('skip')
+  // Same account under a different company. Defaults to adding: a payee really
+  // can be recorded once per group company, so that is the common case.
+  const [onCrossCompany, setOnCrossCompany] = useState('add')
   const [importBusy, setImportBusy] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
 
@@ -186,6 +189,7 @@ export default function MasterDataPage() {
     setImportFile(null)
     setPreview(null)
     setOnDuplicate('skip')
+    setOnCrossCompany('add')
     setImportOpen(true)
   }
 
@@ -209,7 +213,8 @@ export default function MasterDataPage() {
   const runImport = async () => {
     setImportBusy(true)
     try {
-      const result = await importBeneficiaries(importFile, true, onDuplicate)
+      const result = await importBeneficiaries(
+        importFile, true, onDuplicate, onCrossCompany)
       const parts = [`${result.inserted} added`]
       if (result.updated) parts.push(`${result.updated} updated`)
       if (result.skipped) parts.push(`${result.skipped} skipped`)
@@ -582,11 +587,12 @@ export default function MasterDataPage() {
 
           {preview && (
             <>
-              <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="grid grid-cols-5 gap-3 text-center">
                 {[
                   ['Rows', preview.total_rows, 'text-slate-700'],
                   ['To add', preview.importable, 'text-emerald-600'],
                   ['Already exist', preview.duplicate_count, 'text-amber-600'],
+                  ['Other company', preview.cross_company_count, 'text-sky-600'],
                   ['Rejected', preview.error_count, 'text-red-600'],
                 ].map(([label, value, tone]) => (
                   <div key={label} className="card p-3">
@@ -682,6 +688,49 @@ export default function MasterDataPage() {
                 </div>
               )}
 
+              {/* Same account number, different company. A separate question
+                  from the duplicate one: these are not the same record, so
+                  overwriting is not on the table — only whether they belong. */}
+              {preview.cross_company_count > 0 && (
+                <div className="card p-3 space-y-2">
+                  <div className="text-sm font-medium">
+                    {preview.cross_company_count} row
+                    {preview.cross_company_count === 1 ? '' : 's'} use an account
+                    number you already have under a <em>different</em> company.
+                  </div>
+                  {[
+                    ['add', 'Add them',
+                     ' — the same payee recorded for another group company. This is normal.'],
+                    ['skip', 'Skip them',
+                     ' — leave them out, e.g. if the account was pasted onto the wrong row.'],
+                  ].map(([mode, title, note]) => (
+                    <label key={mode} className="flex items-start gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="on-cross-company"
+                        value={mode}
+                        checked={onCrossCompany === mode}
+                        onChange={() => setOnCrossCompany(mode)}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="font-medium">{title}</span>
+                        <span className="text-slate-500">{note}</span>
+                      </span>
+                    </label>
+                  ))}
+                  <ul className="text-xs text-slate-500 pl-1">
+                    {preview.cross_company.map((d) => (
+                      <li key={d.row}>
+                        Row {d.row}: {d.name} ({d.account_number}) → {d.company};
+                        already held under {d.existing_company}
+                      </li>
+                    ))}
+                    {preview.cross_company_truncated && <li>…and more</li>}
+                  </ul>
+                </div>
+              )}
+
               {preview.error_count > 0 && (
                 <div className="card p-3">
                   <div className="flex items-center gap-1.5 text-sm font-medium text-red-600">
@@ -713,7 +762,9 @@ export default function MasterDataPage() {
             <button
               onClick={runImport}
               disabled={importBusy || !preview ||
-                        (preview.importable === 0 && preview.duplicate_count === 0)}
+                        (preview.importable === 0 &&
+                         preview.duplicate_count === 0 &&
+                         preview.cross_company_count === 0)}
               className="btn-primary text-sm"
             >
               {importBusy ? 'Importing…' : 'Import'}

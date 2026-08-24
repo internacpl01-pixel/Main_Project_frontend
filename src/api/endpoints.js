@@ -266,11 +266,14 @@ export async function deleteAllBeneficiaries() {
 // Bulk-load beneficiaries from a sheet. save=false previews and writes nothing;
 // the preview is what tells the user how many rows already exist, which is the
 // question onDuplicate answers on the second call.
-export async function importBeneficiaries(file, save = false, onDuplicate = 'skip') {
+export async function importBeneficiaries(
+  file, save = false, onDuplicate = 'skip', onCrossCompany = 'add',
+) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
   form.append('on_duplicate', onDuplicate)
+  form.append('on_cross_company', onCrossCompany)
   const { data } = await api.post('/master/beneficiary/import', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
