@@ -114,12 +114,28 @@ export default function MasterDataPage() {
   // What a given field may be set to, minus anything already chosen in one of
   // its distinct groups — the constraint is enforced server-side and in the
   // database, but a value that cannot be saved should not be offered.
+  // Returns [{ value, label }]. value is what gets stored; label is what the
+  // dropdown shows, and the two differ when a field stores something other than
+  // the master's display column — Company stores 'DPL' but is picked by reading
+  // 'DPL — DWARKADHIS PROJECTS PRIVATE LIMITED'.
   const optionsFor = useCallback((field) => {
-    if (!field.options_from) return null
+    if (!field.options_from) return []
     const type = schema.find((s) => s.key === field.options_from)
     const labelField = type?.label_field || 'name'
+    const valueField = field.options_value || labelField
+
     const all = (optionSets[field.options_from] || [])
-      .map((row) => row[labelField])
+      .map((row) => {
+        // A row with nothing in the value column cannot be stored, so it falls
+        // back to the display column rather than becoming an unpickable blank.
+        const value = row[valueField] || row[labelField]
+        if (!value) return null
+        const shown = row[labelField]
+        return {
+          value,
+          label: shown && shown !== value ? `${value} — ${shown}` : value,
+        }
+      })
       .filter(Boolean)
 
     const group = (config?.distinct_groups || []).find((g) => g.includes(field.key))
@@ -129,7 +145,7 @@ export default function MasterDataPage() {
     )
     // The field's own current value stays listed, or editing a saved row would
     // show a blank select over a value that is really there.
-    return all.filter((name) => !taken.has(name) || name === form[field.key])
+    return all.filter((o) => !taken.has(o.value) || o.value === form[field.key])
   }, [optionSets, schema, config, form])
 
   // Client-side filtering, sorting, and pagination
@@ -794,7 +810,9 @@ export default function MasterDataPage() {
                   className="input"
                 >
                   <option value="">Select...</option>
-                  {optionsFor(field).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  {optionsFor(field).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               ) : field.type === 'select' ? (
                 <select
