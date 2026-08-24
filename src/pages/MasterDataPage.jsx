@@ -488,7 +488,14 @@ export default function MasterDataPage() {
               ) : (
                 <input
                   value={form[field.key] || ''}
-                  onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                  // Upper-cased as it is typed, for fields the server says are
+                  // upper-case — it normalises the value anyway, so this only
+                  // makes that visible instead of surprising on save.
+                  onChange={(e) => setForm({
+                    ...form,
+                    [field.key]: field.upper ? e.target.value.toUpperCase() : e.target.value,
+                  })}
+                  maxLength={field.maxlength}
                   className="input"
                   placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
                 />
