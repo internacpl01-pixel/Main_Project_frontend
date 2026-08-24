@@ -520,10 +520,10 @@ export default function MasterDataPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="label">Excel or CSV file</label>
+            <label className="label">Excel, CSV or PDF file</label>
             <input
               type="file"
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.csv,.pdf"
               onChange={(e) => handleImportFile(e.target.files?.[0] || null)}
               className="input"
             />
@@ -560,6 +560,46 @@ export default function MasterDataPage() {
                 <p className="text-xs text-slate-500">
                   Ignored columns: {preview.unmapped_headers.join(', ')}
                 </p>
+              )}
+
+              {/* A PDF holds no table, only characters at positions — the rows
+                  below were reconstructed, so they are worth a glance before
+                  they become payment details. A sheet is read exactly. */}
+              {importFile?.name?.toLowerCase().endsWith('.pdf') && (
+                <p className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Read from a PDF, where the columns had to be worked out from
+                    the layout. Check the account numbers and IFSC codes below
+                    before importing — export as Excel or CSV if you can.
+                  </span>
+                </p>
+              )}
+
+              {preview.preview?.length > 0 && (
+                <div className="card p-0 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        {['Name', 'Account', 'IFSC', 'Bank', 'Company', 'Head 1'].map((h) => (
+                          <th key={h} className="text-left px-3 py-2 font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.preview.map((r, i) => (
+                        <tr key={i} className="border-t border-slate-100">
+                          {['name', 'account_number', 'ifsc_code', 'bank_name',
+                            'company', 'head1'].map((k) => (
+                            <td key={k} className="px-3 py-1.5 whitespace-nowrap">
+                              {r[k] || <span className="text-slate-300">—</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Only asked when it can change the outcome. */}
