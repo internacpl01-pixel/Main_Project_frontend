@@ -36,6 +36,10 @@ export default function MasterDataPage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
+  // Rows of every master type some field on this tab draws its options from,
+  // keyed by that type. Beneficiary's nine head fields are the only user today.
+  const [optionSets, setOptionSets] = useState({})
+
   const config = schema.find((s) => s.key === masterType) || null
 
   useEffect(() => {
@@ -69,6 +73,50 @@ export default function MasterDataPage() {
   }, [masterType])
 
   useEffect(() => { load() }, [load])
+
+  // Load the lists behind this tab's dropdowns. Runs on the tab, not on the
+  // modal, so opening the form does not sit there empty while three requests
+  // go out — and a head added on another tab is picked up by switching back.
+  useEffect(() => {
+    if (!config) return
+    const types = [...new Set(
+      config.fields.map((f) => f.options_from).filter(Boolean)
+    )]
+    if (types.length === 0) return
+
+    let cancelled = false
+    Promise.all(types.map((t) =>
+      fetchMasterData(t)
+        .then((rows) => [t, Array.isArray(rows) ? rows : []])
+        // One failed list must not blank the other two: the field falls back to
+        // an empty dropdown and the rest of the form still works.
+        .catch(() => [t, []])
+    )).then((pairs) => {
+      if (!cancelled) setOptionSets(Object.fromEntries(pairs))
+    })
+    return () => { cancelled = true }
+  }, [config])
+
+  // What a given field may be set to, minus anything already chosen in one of
+  // its distinct groups — the constraint is enforced server-side and in the
+  // database, but a value that cannot be saved should not be offered.
+  const optionsFor = useCallback((field) => {
+    if (!field.options_from) return null
+    const type = schema.find((s) => s.key === field.options_from)
+    const labelField = type?.label_field || 'name'
+    const all = (optionSets[field.options_from] || [])
+      .map((row) => row[labelField])
+      .filter(Boolean)
+
+    const group = (config?.distinct_groups || []).find((g) => g.includes(field.key))
+    if (!group) return all
+    const taken = new Set(
+      group.filter((k) => k !== field.key).map((k) => form[k]).filter(Boolean)
+    )
+    // The field's own current value stays listed, or editing a saved row would
+    // show a blank select over a value that is really there.
+    return all.filter((name) => !taken.has(name) || name === form[field.key])
+  }, [optionSets, schema, config, form])
 
   // Client-side filtering, sorting, and pagination
   const { pageItems, totalItems, totalPages } = useMemo(() => {
@@ -419,7 +467,16 @@ export default function MasterDataPage() {
                 {field.label}
                 {field.required && <span className="text-red-500 ml-0.5">*</span>}
               </label>
-              {field.type === 'select' ? (
+              {field.options_from ? (
+                <select
+                  value={form[field.key] || ''}
+                  onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                  className="input"
+                >
+                  <option value="">Select...</option>
+                  {optionsFor(field).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              ) : field.type === 'select' ? (
                 <select
                   value={form[field.key] || ''}
                   onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
