@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
-  importBeneficiaries,
+  importBeneficiaries, deleteAllBeneficiaries,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
@@ -49,6 +49,7 @@ export default function MasterDataPage() {
   const [preview, setPreview] = useState(null)
   const [onDuplicate, setOnDuplicate] = useState('skip')
   const [importBusy, setImportBusy] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
 
   const config = schema.find((s) => s.key === masterType) || null
 
@@ -223,6 +224,22 @@ export default function MasterDataPage() {
     }
   }
 
+  const runClearAll = async () => {
+    setClearOpen(false)
+    try {
+      const r = await deleteAllBeneficiaries()
+      const parts = [`${r.deleted} deleted`]
+      // Only mentioned when it happened — most companies have no ledger rows
+      // booked against a beneficiary, and a zero here is noise.
+      if (r.archived) parts.push(`${r.archived} archived (used by the ledger)`)
+      if (r.unlinked_staged_rows) parts.push(`${r.unlinked_staged_rows} staged rows unlinked`)
+      toast.success(parts.join(', '))
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   const openCreate = () => {
     setEditing(null)
     setForm(blankForm(config))
@@ -365,6 +382,14 @@ export default function MasterDataPage() {
             <button onClick={openImport} className="btn-secondary">
               <Upload className="h-4 w-4 mr-1.5" />
               Import
+            </button>
+          )}
+          {/* Hidden when the table is already empty — a destructive button that
+              would do nothing is only there to be pressed by mistake. */}
+          {canWrite && config.importable && totalItems > 0 && (
+            <button onClick={() => setClearOpen(true)} className="btn-danger">
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              Delete All
             </button>
           )}
           {canWrite && (
@@ -510,6 +535,21 @@ export default function MasterDataPage() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={clearOpen}
+        onClose={() => setClearOpen(false)}
+        onConfirm={runClearAll}
+        danger
+        title={`Delete all ${totalItems} ${config?.label?.toLowerCase() ?? ''} records?`}
+        message={
+          'This removes every row in the table and cannot be undone. Anyone the ' +
+          'ledger has already booked against is archived instead of deleted, ' +
+          'because removing them would break those transactions. Staged rows ' +
+          'keep their data but lose the beneficiary and need it picked again.'
+        }
+        confirmText="Delete all"
+      />
 
       {/* Sheet import */}
       <Modal

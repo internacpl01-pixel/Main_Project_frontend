@@ -255,6 +255,14 @@ export async function createMasterEntry(masterType, payload) {
   return data
 }
 
+// Empty the beneficiary table. A real delete, not the archive the single-row
+// button does — archived rows keep their account numbers, and the importer
+// matches on those, so a corrected sheet would be refused as duplicates.
+export async function deleteAllBeneficiaries() {
+  const { data } = await api.delete('/master/beneficiary/all')
+  return data
+}
+
 // Bulk-load beneficiaries from a sheet. save=false previews and writes nothing;
 // the preview is what tells the user how many rows already exist, which is the
 // question onDuplicate answers on the second call.
