@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
+  importBeneficiaries,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Plus, Pencil, Trash2, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
 
 // The tab list, the table columns and the add/edit form all come from
 // GET /master/_schema. This page used to carry its own copy of the backend's
@@ -39,6 +40,15 @@ export default function MasterDataPage() {
   // Rows of every master type some field on this tab draws its options from,
   // keyed by that type. Beneficiary's nine head fields are the only user today.
   const [optionSets, setOptionSets] = useState({})
+
+  // Sheet import. `preview` is the server's dry run: it holds the counts the
+  // duplicate choice is made from, so the Import button stays disabled until it
+  // has arrived.
+  const [importOpen, setImportOpen] = useState(false)
+  const [importFile, setImportFile] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [onDuplicate, setOnDuplicate] = useState('skip')
+  const [importBusy, setImportBusy] = useState(false)
 
   const config = schema.find((s) => s.key === masterType) || null
 
@@ -169,6 +179,48 @@ export default function MasterDataPage() {
     setSortBy(schema.find((s) => s.key === type)?.label_field || null)
     setSortDir('asc')
     setPage(1)
+  }
+
+  const openImport = () => {
+    setImportFile(null)
+    setPreview(null)
+    setOnDuplicate('skip')
+    setImportOpen(true)
+  }
+
+  // Picking a file runs the dry run immediately. Nothing is written, and it is
+  // the only way to know whether the duplicate question even needs asking.
+  const handleImportFile = async (file) => {
+    setImportFile(file)
+    setPreview(null)
+    if (!file) return
+    setImportBusy(true)
+    try {
+      setPreview(await importBeneficiaries(file, false))
+    } catch (err) {
+      toast.error(err.message)
+      setImportFile(null)
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const runImport = async () => {
+    setImportBusy(true)
+    try {
+      const result = await importBeneficiaries(importFile, true, onDuplicate)
+      const parts = [`${result.inserted} added`]
+      if (result.updated) parts.push(`${result.updated} updated`)
+      if (result.skipped) parts.push(`${result.skipped} skipped`)
+      if (result.rejected) parts.push(`${result.rejected} rejected`)
+      toast.success(parts.join(', '))
+      setImportOpen(false)
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setImportBusy(false)
+    }
   }
 
   const openCreate = () => {
@@ -309,6 +361,12 @@ export default function MasterDataPage() {
           <button onClick={load} disabled={loading} className="btn-secondary">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
+          {canWrite && config.importable && (
+            <button onClick={openImport} className="btn-secondary">
+              <Upload className="h-4 w-4 mr-1.5" />
+              Import
+            </button>
+          )}
           {canWrite && (
             <button onClick={openCreate} className="btn-primary">
               <Plus className="h-4 w-4 mr-1.5" />
@@ -452,6 +510,137 @@ export default function MasterDataPage() {
           </>
         )}
       </div>
+
+      {/* Sheet import */}
+      <Modal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        title={`Import ${config?.label ?? ''}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label">Excel or CSV file</label>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => handleImportFile(e.target.files?.[0] || null)}
+              className="input"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Needs a header row. Recognised: Beneficiary Name, Account Number,
+              IFSC Code, Bank Name, Company, Head 1–3, and RERA Head 1–3 /
+              TCP Head 1–3 when you add them.
+            </p>
+          </div>
+
+          {importBusy && !preview && (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Spinner size="sm" /> Reading the sheet…
+            </div>
+          )}
+
+          {preview && (
+            <>
+              <div className="grid grid-cols-4 gap-3 text-center">
+                {[
+                  ['Rows', preview.total_rows, 'text-slate-700'],
+                  ['To add', preview.importable, 'text-emerald-600'],
+                  ['Already exist', preview.duplicate_count, 'text-amber-600'],
+                  ['Rejected', preview.error_count, 'text-red-600'],
+                ].map(([label, value, tone]) => (
+                  <div key={label} className="card p-3">
+                    <div className={`text-xl font-semibold ${tone}`}>{value}</div>
+                    <div className="text-xs text-slate-500">{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {preview.unmapped_headers?.length > 0 && (
+                <p className="text-xs text-slate-500">
+                  Ignored columns: {preview.unmapped_headers.join(', ')}
+                </p>
+              )}
+
+              {/* Only asked when it can change the outcome. */}
+              {preview.duplicate_count > 0 && (
+                <div className="card p-3 space-y-2">
+                  <div className="text-sm font-medium">
+                    {preview.duplicate_count} row
+                    {preview.duplicate_count === 1 ? '' : 's'} already exist
+                    {preview.duplicate_count === 1 ? 's' : ''}, matched on account
+                    number. What should happen to them?
+                  </div>
+                  {['skip', 'overwrite'].map((mode) => (
+                    <label key={mode} className="flex items-start gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="on-duplicate"
+                        value={mode}
+                        checked={onDuplicate === mode}
+                        onChange={() => setOnDuplicate(mode)}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="font-medium capitalize">{mode}</span>
+                        <span className="text-slate-500">
+                          {mode === 'skip'
+                            ? ' — leave the existing beneficiary exactly as it is.'
+                            : ' — replace it with what the sheet says. Anything edited in the app is lost.'}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                  <ul className="text-xs text-slate-500 pl-1">
+                    {preview.duplicates.map((d) => (
+                      <li key={d.row}>
+                        Row {d.row}: {d.name} ({d.account_number || 'no account number'})
+                      </li>
+                    ))}
+                    {preview.duplicates_truncated && <li>…and more</li>}
+                  </ul>
+                </div>
+              )}
+
+              {preview.error_count > 0 && (
+                <div className="card p-3">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-red-600">
+                    <AlertTriangle className="h-4 w-4" />
+                    These rows will not be imported
+                  </div>
+                  <ul className="text-xs text-slate-600 mt-2 space-y-1">
+                    {preview.errors.map((e) => (
+                      <li key={e.row}>
+                        <span className="font-medium">Row {e.row}</span>
+                        {e.name ? ` (${e.name})` : ''}: {e.problems.join('; ')}
+                      </li>
+                    ))}
+                    {preview.errors_truncated && <li>…and more</li>}
+                  </ul>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Fix the sheet, or add the missing entry under its own tab,
+                    then import again. Importing now brings in the other rows.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setImportOpen(false)} className="btn-secondary text-sm">
+              Cancel
+            </button>
+            <button
+              onClick={runImport}
+              disabled={importBusy || !preview ||
+                        (preview.importable === 0 && preview.duplicate_count === 0)}
+              className="btn-primary text-sm"
+            >
+              {importBusy ? 'Importing…' : 'Import'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Create/Edit Modal */}
       <Modal

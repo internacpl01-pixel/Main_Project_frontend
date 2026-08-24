@@ -255,6 +255,21 @@ export async function createMasterEntry(masterType, payload) {
   return data
 }
 
+// Bulk-load beneficiaries from a sheet. save=false previews and writes nothing;
+// the preview is what tells the user how many rows already exist, which is the
+// question onDuplicate answers on the second call.
+export async function importBeneficiaries(file, save = false, onDuplicate = 'skip') {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('save', String(save))
+  form.append('on_duplicate', onDuplicate)
+  const { data } = await api.post('/master/beneficiary/import', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: IMPORT_TIMEOUT_MS,
+  })
+  return data
+}
+
 export async function updateMasterEntry(masterType, itemId, payload) {
   const { data } = await api.patch(`/master/${masterType}/${itemId}`, payload)
   return data
