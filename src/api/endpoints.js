@@ -316,6 +316,21 @@ export async function fetchTransactionSummary() {
   return data
 }
 
+// What the Date / Account Number / Company filters can offer on the ledger.
+// Read once per visit rather than derived from `rows`: rows is one page, and a
+// dropdown built from the page in front of you cannot change what is in front
+// of you. A null facet means this company has no such column.
+export async function fetchTransactionFilters() {
+  const { data } = await api.get('/transactions/filters')
+  return data
+}
+
+// The same three, for the staging table.
+export async function fetchTempImportFilters() {
+  const { data } = await api.get('/transactions/temp-trans/filters')
+  return data
+}
+
 // Paged. Returns { columns, rows, summary, total, page, limit }.
 // `total` follows the tab and search filters; `summary` deliberately does not —
 // it is what the Clear button reports, which is everything staged.

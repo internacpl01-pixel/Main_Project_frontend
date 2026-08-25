@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchTransactions, deleteAllTransactions } from '../api/endpoints.js'
+import {
+  fetchTransactions, fetchTransactionFilters, deleteAllTransactions,
+} from '../api/endpoints.js'
 import {
   Spinner, EmptyState, ConfirmDialog, SearchInput, Pagination,
 } from '../components/UI.jsx'
+import {
+  FilterBar, SortHeader, nextSort, EMPTY_FILTERS, filterParams, activeCount,
+} from '../components/TableFilters.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -35,13 +40,26 @@ export default function LedgerPage() {
   const [loading, setLoading] = useState(true)
   const [clearOpen, setClearOpen] = useState(false)
 
+  // Sorted and filtered in SQL, not here: the ledger is server-paged, so the
+  // browser only ever holds one page and reordering it would leave every other
+  // page alone. `sort` null is the default order — newest first.
+  const [sort, setSort] = useState(null)
+  const [dir, setDir] = useState('asc')
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [filterOptions, setFilterOptions] = useState(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await fetchTransactions({ page, limit, search })
+      const params = { page, limit, search, ...filterParams(filters) }
+      if (sort) { params.sort = sort; params.dir = dir }
+      const data = await fetchTransactions(params)
       setColumns(data.columns || [])
       setRows(data.rows || [])
       setTotal(data.total || 0)
+      // Follow the sort the server says it applied — an unknown column falls
+      // back rather than erroring, and the arrow should not claim otherwise.
+      if ((data.sort ?? null) !== sort) setSort(data.sort ?? null)
     } catch (err) {
       toast.error(err.message)
       setRows([])
@@ -49,9 +67,28 @@ export default function LedgerPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, limit, search])
+  }, [page, limit, search, sort, dir, filters])
 
   useEffect(() => { load() }, [load])
+
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      setFilterOptions(await fetchTransactionFilters())
+    } catch {
+      setFilterOptions(null)
+    }
+  }, [])
+
+  useEffect(() => { loadFilterOptions() }, [loadFilterOptions])
+
+  // Back to page 1 on every change of sort or filter — page 7 of one ordering
+  // is not page 7 of another, and landing past the end shows an empty table.
+  const handleSort = (field) => {
+    const n = nextSort(sort, dir, field)
+    setSort(n.sort); setDir(n.dir); setPage(1)
+  }
+
+  const handleFilters = (next) => { setFilters(next); setPage(1) }
 
   const runClearAll = async () => {
     setClearOpen(false)
@@ -65,6 +102,8 @@ export default function LedgerPage() {
       )
       setPage(1)
       load()
+      // Nothing is left to filter by once the ledger is empty.
+      loadFilterOptions()
     } catch (err) {
       toast.error(err.message)
     }
@@ -94,7 +133,11 @@ export default function LedgerPage() {
         description="Posted transactions. Rows reach here from Imported Rows once they are classified and finalized."
         actions={
           <div className="flex items-center gap-2">
-            <button onClick={load} disabled={loading} className="btn-secondary">
+            <button
+              onClick={() => { load(); loadFilterOptions() }}
+              disabled={loading}
+              className="btn-secondary"
+            >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             {/* Hidden when the ledger is already empty — a destructive button
@@ -108,6 +151,22 @@ export default function LedgerPage() {
           </div>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <FilterBar
+          options={filterOptions}
+          value={filters}
+          onChange={handleFilters}
+          loading={!filterOptions}
+        />
+        {activeCount(filters) > 0 && !loading && filterOptions && (
+          <span className="text-xs text-slate-500">
+            {total.toLocaleString('en-IN')} of{' '}
+            {(filterOptions.total ?? 0).toLocaleString('en-IN')} posted{' '}
+            {filterOptions.total === 1 ? 'row' : 'rows'}
+          </span>
+        )}
+      </div>
 
       <SearchInput
         value={search}
@@ -125,21 +184,30 @@ export default function LedgerPage() {
                     render identically — renaming a field then looks like the
                     edit never saved. */}
                 {columns.map((c) => (
-                  <th
+                  <SortHeader
                     key={c.name}
+                    field={c.name}
+                    label={c.displayname || c.name}
                     title={c.name}
-                    className={`px-6 py-3 text-xs font-medium text-slate-500 tracking-wide whitespace-nowrap ${
-                      isNumeric(c) ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    {c.displayname || c.name}
-                  </th>
+                    align={isNumeric(c) ? 'right' : 'left'}
+                    sort={sort}
+                    dir={dir}
+                    onSort={handleSort}
+                  />
                 ))}
+                {/* Sorted by the master's name, not by the id behind it: an id
+                    orders by when the head was created, which is not an order
+                    anyone asked for. The server resolves both from the same
+                    join it already draws the cell from. */}
                 {RESOLVED.map((r) => (
-                  <th key={r.key}
-                      className="px-6 py-3 text-left text-xs font-medium text-slate-500 tracking-wide whitespace-nowrap">
-                    {r.label}
-                  </th>
+                  <SortHeader
+                    key={r.key}
+                    field={r.key}
+                    label={r.label}
+                    sort={sort}
+                    dir={dir}
+                    onSort={handleSort}
+                  />
                 ))}
               </tr>
             </thead>
@@ -154,13 +222,29 @@ export default function LedgerPage() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + RESOLVED.length} className="px-6 py-16">
+                    {/* A filter left on from earlier looks exactly like an
+                        empty ledger, so it is named and offered a way out. */}
                     <EmptyState
-                      title={search ? 'No matching transactions' : 'Nothing posted yet'}
-                      description={
-                        search
-                          ? 'Try different search terms.'
-                          : 'Classify rows under Imported Rows and finalize them to post them here.'
+                      title={
+                        search || activeCount(filters)
+                          ? 'No matching transactions'
+                          : 'Nothing posted yet'
                       }
+                      description={
+                        activeCount(filters)
+                          ? `${filterOptions?.total ?? 0} rows are posted, but none match the filters${search ? ' and search' : ''} you have set.`
+                          : search
+                            ? 'Try different search terms.'
+                            : 'Classify rows under Imported Rows and finalize them to post them here.'
+                      }
+                      action={activeCount(filters) > 0 && (
+                        <button
+                          onClick={() => handleFilters({ ...EMPTY_FILTERS })}
+                          className="btn-secondary text-sm"
+                        >
+                          Clear filters
+                        </button>
+                      )}
                     />
                   </td>
                 </tr>

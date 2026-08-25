@@ -1,12 +1,15 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  fetchTempImport, fetchProjects, fetchMasterData, classifyRow, finalizeRow,
-  clearTempTrans, deleteTempRow,
+  fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
+  classifyRow, finalizeRow, clearTempTrans, deleteTempRow,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
   Highlight, matchesNumber,
 } from '../components/UI.jsx'
+import {
+  FilterBar, SortHeader, nextSort, EMPTY_FILTERS, filterParams, activeCount,
+} from '../components/TableFilters.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -64,6 +67,16 @@ export default function StagingPage() {
   // different numbers and mean different things.
   const [total, setTotal] = useState(0)
 
+  // Sorting and the three filters are done in SQL, like the search — the
+  // browser holds one page, so sorting it would only reorder the fifty rows in
+  // front of you and leave the other pages alone. `sort` null means the natural
+  // order, which here is the order the statement was read in.
+  const [sort, setSort] = useState(null)
+  const [dir, setDir] = useState('asc')
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  // The values the filter dropdowns can offer, read once per visit.
+  const [filterOptions, setFilterOptions] = useState(null)
+
   useEffect(() => {
     // setPage in the same tick as setQuery, so the two land in one render and
     // the table fetches once. Resetting the page matters: staying on page 7
@@ -113,10 +126,11 @@ export default function StagingPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = { page, limit }
+      const params = { page, limit, ...filterParams(filters) }
       if (filter === 'pending') params.classified = false
       if (filter === 'classified') params.classified = true
       if (query.trim()) params.search = query.trim()
+      if (sort) { params.sort = sort; params.dir = dir }
       // The server decides the column set — it is read from the live
       // temp_trans table with names from the fieldmap, so a custom field shows
       // up here the moment it is created, with no change needed on this page.
@@ -126,14 +140,45 @@ export default function StagingPage() {
       setSummary(data.summary || null)
       setTerms(data.search_terms || [])
       setTotal(data.total ?? 0)
+      // The server reports the sort it actually applied, which is not always
+      // the one asked for — a sort naming a field deleted since the page loaded
+      // falls back to the natural order. Following it keeps the header arrow
+      // honest instead of pointing at a column nothing was ordered by.
+      if ((data.sort ?? null) !== sort) { setSort(data.sort ?? null) }
     } catch (err) {
       toast.error(err.message)
     } finally {
       setLoading(false)
     }
-  }, [filter, query, page, limit])
+  }, [filter, query, page, limit, sort, dir, filters])
 
   useEffect(() => { load() }, [load])
+
+  // The dropdown contents, separate from the rows. Read across the whole table
+  // rather than the current tab, so the accounts on offer are every account in
+  // staging and not just the ones already on screen. Reloaded after anything
+  // that changes which rows exist.
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      setFilterOptions(await fetchTempImportFilters())
+    } catch {
+      // A filter bar that cannot load is not worth interrupting the table for;
+      // the buttons stay disabled and the rows still list.
+      setFilterOptions(null)
+    }
+  }, [])
+
+  useEffect(() => { loadFilterOptions() }, [loadFilterOptions])
+
+  // Any change to sorting or filtering goes back to page 1. Page 7 of "sorted
+  // by date" is not page 7 of anything else, and staying there shows an empty
+  // table that reads as "no rows".
+  const handleSort = (field) => {
+    const n = nextSort(sort, dir, field)
+    setSort(n.sort); setDir(n.dir); setPage(1)
+  }
+
+  const handleFilters = (next) => { setFilters(next); setPage(1) }
 
   const openClassify = (row) => {
     setTarget(row)
@@ -193,6 +238,8 @@ export default function StagingPage() {
       )
       setClearOpen(false)
       load()
+      // Every account number and company that was on offer just went with it.
+      loadFilterOptions()
     } catch (err) {
       // 409 when rows are already posted — the message names the count, so it
       // is shown as-is and the dialog stays open.
@@ -212,6 +259,9 @@ export default function StagingPage() {
       // step back before reloading.
       if (rows.length === 1 && page > 1) setPage(page - 1)
       else load()
+      // The counts beside each dropdown value just changed, and removing the
+      // last row of an account takes that account off the list entirely.
+      loadFilterOptions()
     } catch (err) {
       // 409 names the transaction holding it — shown as-is, dialog stays open.
       toast.error(err.message)
@@ -294,7 +344,10 @@ export default function StagingPage() {
         description="Everything parsed out of your statements, in temp_trans. Tag a row and post it to the ledger."
         actions={
           <div className="flex items-center gap-2">
-            <button onClick={load} className="btn-secondary btn-sm">
+            <button
+              onClick={() => { load(); loadFilterOptions() }}
+              className="btn-secondary btn-sm"
+            >
               <RefreshCw className="h-3.5 w-3.5 mr-1" />
               Refresh
             </button>
@@ -371,6 +424,26 @@ export default function StagingPage() {
         </div>
       </div>
 
+      {/* Filtered in SQL like the search, and for the same reason. The date
+          range, the account number and the company are the three things a
+          statement is looked up by, so they are buttons rather than something
+          to be typed into the search box and hoped for. */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <FilterBar
+          options={filterOptions}
+          value={filters}
+          onChange={handleFilters}
+          loading={!filterOptions}
+        />
+        {activeCount(filters) > 0 && !loading && (
+          <span className="text-xs text-slate-500">
+            {total.toLocaleString('en-IN')} of{' '}
+            {(summary?.staged_total ?? 0).toLocaleString('en-IN')} staged{' '}
+            {summary?.staged_total === 1 ? 'row' : 'rows'}
+          </span>
+        )}
+      </div>
+
       <div className="card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -386,18 +459,29 @@ export default function StagingPage() {
                     from the fieldmap; a column with no mapping falls back to its
                     own name rather than rendering an empty cell. */}
                 {columns.map((c) => (
-                  <th
+                  <SortHeader
                     key={c.name}
+                    field={c.name}
+                    label={c.displayname || c.name}
                     title={c.name}
-                    className={`px-6 py-3 text-xs font-medium text-slate-500 tracking-wide whitespace-nowrap ${
-                      isNumeric(c) ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    {c.displayname || c.name}
-                  </th>
+                    align={isNumeric(c) ? 'right' : 'left'}
+                    sort={sort}
+                    dir={dir}
+                    onSort={handleSort}
+                  />
                 ))}
+                {/* Not sortable: five separate tags share this cell and there
+                    is no one value to order them by. Sort by Head or
+                    Beneficiary on the Ledger if that is the question. */}
                 <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Classification</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Status</th>
+                <SortHeader
+                  field="is_classified"
+                  label="Status"
+                  sort={sort}
+                  dir={dir}
+                  onSort={handleSort}
+                  align="center"
+                />
                 <th className="text-right px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Actions</th>
               </tr>
             </thead>
@@ -407,17 +491,43 @@ export default function StagingPage() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + 3}>
+                    {/* An empty table has three different causes and they need
+                        three different next steps — nothing imported, a search
+                        that matched nothing, or a filter left on from earlier.
+                        The last one is the one people misread as lost data. */}
                     <EmptyState
                       icon={<Sparkles className="h-10 w-10" />}
-                      title={query ? 'No matching rows' : 'No staged rows'}
-                      description={
-                        query
-                          ? `Nothing in the ${filter} rows matches "${query}".`
-                          : 'When you import a statement, rows land here for review.'
+                      title={
+                        query || activeCount(filters) ? 'No matching rows' : 'No staged rows'
                       }
-                      action={query
-                        ? <button onClick={() => setSearch('')} className="btn-secondary text-sm">Clear search</button>
-                        : undefined}
+                      description={
+                        query && activeCount(filters)
+                          ? `Nothing in the ${filter} rows matches "${query}" within the filters you have set.`
+                          : query
+                            ? `Nothing in the ${filter} rows matches "${query}".`
+                            : activeCount(filters)
+                              ? `${summary?.staged_total ?? 0} rows are staged, but none of them match the filters you have set.`
+                              : 'When you import a statement, rows land here for review.'
+                      }
+                      action={
+                        query || activeCount(filters) ? (
+                          <div className="flex items-center justify-center gap-2">
+                            {query && (
+                              <button onClick={() => setSearch('')} className="btn-secondary text-sm">
+                                Clear search
+                              </button>
+                            )}
+                            {activeCount(filters) > 0 && (
+                              <button
+                                onClick={() => handleFilters({ ...EMPTY_FILTERS })}
+                                className="btn-secondary text-sm"
+                              >
+                                Clear filters
+                              </button>
+                            )}
+                          </div>
+                        ) : undefined
+                      }
                     />
                   </td>
                 </tr>
