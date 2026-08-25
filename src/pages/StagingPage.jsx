@@ -328,12 +328,6 @@ export default function StagingPage() {
     return parts.length ? parts.join(' · ') : `row ${row.row_number} of batch ${row.batch_id}`
   }
 
-  // The names come back joined from the API, so the table shows what was
-  // picked without holding a copy of every master list to look ids up against.
-  const classificationOf = (row) => [
-    row.project_name, row.head_name, row.rera_head_name, row.idw_head_name, row.beneficiary_name,
-  ].filter(Boolean)
-
   const noOptionsAtAll = !optionsLoading &&
     HEAD_KEYS.every((k) => (options[k] || []).length === 0)
 
@@ -470,10 +464,11 @@ export default function StagingPage() {
                     onSort={handleSort}
                   />
                 ))}
-                {/* Not sortable: five separate tags share this cell and there
-                    is no one value to order them by. Sort by Head or
-                    Beneficiary on the Ledger if that is the question. */}
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Classification</th>
+                {/* No Classification column. Every classification now writes
+                    its name into the column that mirrors it — Project into
+                    BUSINESS UNIT, and the three heads into HEAD, TYPE FOR RERA
+                    IDW and TCP Head — so a separate tag list repeated what the
+                    data columns already say. */}
                 <SortHeader
                   field="is_classified"
                   label="Status"
@@ -487,10 +482,10 @@ export default function StagingPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={columns.length + 3} className="px-6 py-12"><Spinner /></td></tr>
+                <tr><td colSpan={columns.length + 2} className="px-6 py-12"><Spinner /></td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 3}>
+                  <td colSpan={columns.length + 2}>
                     {/* An empty table has three different causes and they need
                         three different next steps — nothing imported, a search
                         that matched nothing, or a filter left on from earlier.
@@ -532,9 +527,7 @@ export default function StagingPage() {
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => {
-                  const tags = classificationOf(row)
-                  return (
+                rows.map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
                       {columns.map((c) => (
                         <td
@@ -567,23 +560,6 @@ export default function StagingPage() {
                           )}
                         </td>
                       ))}
-                      <td className="px-6 py-3 align-top">
-                        {tags.length === 0 ? (
-                          <span className="text-xs text-slate-300">—</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1">
-                            {/* Marked up too: the search reaches into the
-                                joined master names, so a row can be here
-                                because of its head or beneficiary and nothing
-                                in the data columns will show why. */}
-                            {tags.map((t) => (
-                              <span key={t} className="inline-flex px-2 py-0.5 rounded bg-slate-100 text-xs text-slate-600">
-                                <Highlight text={t} terms={terms} />
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </td>
                       <td className="px-6 py-3 text-center align-top">
                         {row.is_classified ? (
                           <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
@@ -632,8 +608,7 @@ export default function StagingPage() {
                         </div>
                       </td>
                     </tr>
-                  )
-                })
+                ))
               )}
             </tbody>
           </table>
