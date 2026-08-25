@@ -445,11 +445,34 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
   }
 }
 
-export async function importExcel(file, save = false, bankId = null) {
+// What is in a workbook, before anything is imported. Returns
+// { sheets: [{ name, rows, data_rows, header_row, headers_detected,
+//              unmapped_headers, is_statement, reason, sample,
+//              column_collisions, document_fields }], statement_sheets, ... }
+//
+// The spreadsheet equivalent of the PDF page selector, and it has to run first:
+// a workbook holds one sheet per bank account and the tab names alone do not
+// say which are statements or how many rows each holds. Nothing is written.
+export async function inspectExcel(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post('/imports/excel/inspect', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: IMPORT_TIMEOUT_MS,
+  })
+  return data
+}
+
+// `sheets` is a comma-separated list of sheet names; blank imports every sheet
+// that looks like a statement. Each sheet becomes its own batch.
+export async function importExcel(file, save = false, bankId = null,
+                                  { sheets = '', background = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
   if (bankId) form.append('bank_id', String(bankId))
+  if (sheets) form.append('sheets', sheets)
+  if (background) form.append('background', 'true')
   const { data } = await api.post('/imports/excel', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
@@ -457,11 +480,13 @@ export async function importExcel(file, save = false, bankId = null) {
   return data
 }
 
-export async function importCsv(file, save = false, bankId = null) {
+export async function importCsv(file, save = false, bankId = null,
+                                { background = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
   if (bankId) form.append('bank_id', String(bankId))
+  if (background) form.append('background', 'true')
   const { data } = await api.post('/imports/csv', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,

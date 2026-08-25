@@ -1,12 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  importPdf, importExcel, importCsv, fetchMasterData, pollImportJob,
+  importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
+  pollImportJob,
 } from '../api/endpoints.js'
-import { PasswordInput } from '../components/UI.jsx'
+import { PasswordInput, Spinner } from '../components/UI.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
+  Layers,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -14,21 +16,26 @@ import {
 // save=true, exactly as DPL's Api.uploadPdf always sent save:'true'. What the
 // parser found is reported afterwards, from the same response.
 //
-// A PDF goes the background route: it hands back a job id in milliseconds and
-// the parse continues server-side, which is what makes a real progress bar
-// possible and what keeps a long statement from outliving the request. Excel
-// and CSV stay direct — they finish in about a second, so a job would be more
-// machinery than the work it describes.
+// Every format goes the background route now. It hands back a job id in
+// milliseconds and the work continues server-side, which is what makes a real
+// progress bar possible and what keeps a long import from outliving the
+// request. Excel used to stay direct because it was "about a second" — that was
+// true when it read one sheet; a workbook of eight accounts and a few thousand
+// rows is a different job, and it reports per sheet exactly as a PDF reports
+// per batch.
 async function importFile(file, bankId = null, password = '', pages = '',
-                          batchPages = null, onProgress) {
+                          batchPages = null, onProgress, sheets = '') {
   const ext = file.name.split('.').pop().toLowerCase()
+  let started
   if (ext === 'pdf') {
-    const started = await importPdf(file, true, bankId, password,
-                                    { pages, batchPages, background: true })
-    return pollImportJob(started.job_id, onProgress)
+    started = await importPdf(file, true, bankId, password,
+                              { pages, batchPages, background: true })
+  } else if (ext === 'csv') {
+    started = await importCsv(file, true, bankId, { background: true })
+  } else {
+    started = await importExcel(file, true, bankId, { sheets, background: true })
   }
-  if (ext === 'csv') return importCsv(file, true, bankId)
-  return importExcel(file, true, bankId)
+  return pollImportJob(started.job_id, onProgress)
 }
 
 // Blank means the whole file. Otherwise a count ("30") or a range ("31-65"),
@@ -70,6 +77,12 @@ export default function ImportPage() {
   const [batchPages, setBatchPages] = useState('')
   // The last reading from the running job, or null when nothing is running.
   const [progress, setProgress] = useState(null)
+  // What the workbook holds, once it has been inspected, and which of its
+  // sheets are ticked. A workbook is one file but several statements, so this
+  // is the spreadsheet's version of the PDF page selector.
+  const [workbook, setWorkbook] = useState(null)
+  const [inspecting, setInspecting] = useState(false)
+  const [chosenSheets, setChosenSheets] = useState([])
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -77,7 +90,7 @@ export default function ImportPage() {
     fetchMasterData('bank').then((b) => setBanks(Array.isArray(b) ? b : [])).catch(() => {})
   }, [])
 
-  const handleFile = useCallback((f) => {
+  const handleFile = useCallback(async (f) => {
     if (!f) return
     if (f.size > 25 * 1024 * 1024) { toast.error('File too large (max 25 MB)'); return }
     const ext = f.name.split('.').pop().toLowerCase()
@@ -87,7 +100,37 @@ export default function ImportPage() {
     setFile(f)
     setResult(null)
     setPwError('')
+    setWorkbook(null)
+    setChosenSheets([])
+
+    if (ext === 'xlsx' || ext === 'xls') {
+      // Read the workbook before asking anything else. Which sheets exist, and
+      // which of them are statements, decides what the rest of this form even
+      // says — and a workbook whose columns were not recognised is worth
+      // knowing about before the rows are staged, not after.
+      setInspecting(true)
+      try {
+        const info = await inspectExcel(f)
+        setWorkbook(info)
+        setChosenSheets(info.statement_sheets || [])
+        if (!info.statement_sheets?.length) {
+          toast.error('No sheet in this workbook looks like a bank statement.')
+        }
+      } catch (err) {
+        // Not fatal: the import itself can still pick the sheets. This only
+        // costs the picker.
+        toast.error(`Could not read the sheets: ${err.message}`)
+      } finally {
+        setInspecting(false)
+      }
+    }
   }, [])
+
+  const toggleSheet = (name) => {
+    setChosenSheets((prev) => prev.includes(name)
+      ? prev.filter((n) => n !== name)
+      : [...prev, name])
+  }
 
   const handleDrop = (e) => {
     e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0])
@@ -97,16 +140,26 @@ export default function ImportPage() {
     const specError = pageSpecError(pages)
     if (specError) { toast.error(specError); return }
 
+    if (isExcel && workbook && chosenSheets.length === 0) {
+      toast.error('Pick at least one sheet to import.')
+      return
+    }
+
     setImporting(true)
     setPwError('')
     setProgress(null)
     try {
       const res = await importFile(file, bankId || null, password, pages.trim(),
                                    batchPages.trim() === '' ? null : Number(batchPages),
-                                   setProgress)
+                                   setProgress, chosenSheets.join(','))
       setResult(res)
-      if (res.row_count > 0) toast.success(`Imported ${res.row_count} rows`)
-      else toast.error('No transaction rows could be extracted from this file.')
+      if (res.row_count > 0) {
+        toast.success(
+          res.sheets_imported > 1
+            ? `Imported ${res.row_count} rows from ${res.sheets_imported} sheets`
+            : `Imported ${res.row_count} rows`
+        )
+      } else toast.error('No transaction rows could be extracted from this file.')
     } catch (err) {
       // A wrong or missing password keeps the form up with the reason inline,
       // rather than a toast that disappears before it can be acted on.
@@ -128,16 +181,28 @@ export default function ImportPage() {
     // Clearing the password is what re-hides it — PasswordInput drops back to
     // hidden whenever its value goes empty, so there is no separate flag here.
     setPassword(''); setPwError(''); setPages(''); setProgress(null)
-    setBatchPages('')
+    setBatchPages(''); setWorkbook(null); setChosenSheets([]); setInspecting(false)
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
+  const isExcel = /\.xlsx?$/i.test(file?.name || '')
+  // The job registry counts "steps"; for a PDF a step is a batch of pages and
+  // for a workbook it is a sheet. Same bar, and the word has to follow the file
+  // or the progress line describes something the user never chose.
+  const stepWord = isExcel ? 'Sheet' : 'Batch'
   const pageSpecErrorText = pageSpecError(pages)
   // A range not starting at page 1 gets page 1 added server-side, for its
   // header. Said before the upload rather than after, so the duplicate rows it
   // produces are expected rather than alarming.
   const rangeStartsLate = /^\s*(\d+)\s*-\s*\d+\s*$/.test(pages)
     && Number(pages.trim().split('-')[0]) > 1
+
+  // Statement sheets only. Counting the pivot table and the beneficiary lists
+  // would report "1 of 11" for a workbook where only 8 tabs were ever
+  // importable, which reads as 10 sheets going missing.
+  const statementSheetCount =
+    (result?.sheets_available || []).filter((s) => s.is_statement).length
+    || result?.sheets_imported || 0
 
   // Columns the parser matched to a field, and headers it could not place.
   const headers = result?.headers_detected || {}
@@ -304,6 +369,105 @@ export default function ImportPage() {
               )}
             </div>
 
+            {/* --- Which sheets to import -------------------------------- */}
+            {isExcel && inspecting && (
+              <div className="mb-5 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+                <Spinner size="sm" />
+                Reading the workbook's sheets...
+              </div>
+            )}
+
+            {isExcel && workbook && (
+              <div className="mb-5">
+                <div className="mb-2 flex items-baseline justify-between">
+                  <p className="label mb-0 flex items-center gap-1.5">
+                    <Layers className="h-3.5 w-3.5 text-slate-400" />
+                    Sheets to import
+                  </p>
+                  <div className="flex items-center gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setChosenSheets(workbook.statement_sheets || [])}
+                      className="font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      Select all statements
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChosenSheets([])}
+                      className="font-medium text-slate-500 hover:text-slate-700"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* One row per sheet, including the ones that cannot be
+                    imported. Leaving those out would make a sheet that SHOULD
+                    be a statement look like it does not exist; shown with the
+                    reason, it is obvious that the columns were not recognised. */}
+                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {(workbook.sheets || []).map((s) => {
+                    const picked = chosenSheets.includes(s.name)
+                    return (
+                      <label
+                        key={s.name}
+                        className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 first:rounded-t-lg last:rounded-b-lg ${
+                          picked ? 'bg-primary-50/60' : 'hover:bg-slate-50'
+                        } ${s.is_statement ? '' : 'opacity-70'}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={picked}
+                          onChange={() => toggleSheet(s.name)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary-600"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="text-sm font-medium text-slate-900">{s.name}</span>
+                            {s.is_statement ? (
+                              <span className="text-xs text-slate-500">
+                                {s.data_rows.toLocaleString('en-IN')} rows ·{' '}
+                                {Object.keys(s.headers_detected || {}).length} columns matched ·
+                                header on row {s.header_row}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                                <Info className="h-3 w-3" />Not a statement
+                              </span>
+                            )}
+                          </span>
+                          {!s.is_statement && s.reason && (
+                            <span className="mt-0.5 block text-xs text-slate-500">{s.reason}</span>
+                          )}
+                          {/* Two spreadsheet columns mapping to one field is a
+                              fieldmap problem the user can fix, and the only
+                              way they can is by being told which column lost. */}
+                          {s.is_statement && s.column_collisions?.length > 0 && (
+                            <span className="mt-1 block text-xs text-amber-700">
+                              {s.column_collisions.map((c) => (
+                                <span key={c.field} className="block">
+                                  Using <span className="font-medium">{c.used}</span> for this
+                                  field — {c.ignored.join(', ')} also matched and{' '}
+                                  {c.ignored.length === 1 ? 'is' : 'are'} being skipped.
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Each sheet is imported as its own batch, so they can be reviewed
+                  and discarded separately. Pick the Bank Account above only if
+                  every sheet you have ticked belongs to it.
+                </p>
+              </div>
+            )}
+
             {/* Real progress, not an animation: the server counts pages as it
                 finishes them and this is that count. It only appears once the
                 first reading arrives, so a fast file never flashes a bar.
@@ -320,7 +484,8 @@ export default function ImportPage() {
                     {progress.state === 'saving'
                       ? 'Saving rows'
                       : progress.batch_total > 1 && progress.batch_index >= 1
-                        ? `Batch ${progress.batch_index} of ${progress.batch_total}`
+                        ? `${stepWord} ${progress.batch_index} of ${progress.batch_total}`
+                          + (progress.batch_label ? ` — ${progress.batch_label}` : '')
                         : 'Reading statement'}
                   </span>
                   <span className="text-sm font-semibold text-slate-900 tabular-nums">
@@ -349,7 +514,7 @@ export default function ImportPage() {
                       <li key={b.index}
                           className="flex items-center text-xs text-emerald-700">
                         <CheckCircle className="mr-1.5 h-3 w-3 shrink-0" />
-                        Batch {b.index} of {b.total} completed · {b.label} ·{' '}
+                        {stepWord} {b.index} of {b.total} completed · {b.label} ·{' '}
                         {b.rows} rows
                       </li>
                     ))}
@@ -361,7 +526,8 @@ export default function ImportPage() {
             <div className="flex justify-center">
               <button
                 onClick={handleImport}
-                disabled={importing || !!pageSpecErrorText}
+                disabled={importing || inspecting || !!pageSpecErrorText
+                          || (isExcel && !!workbook && chosenSheets.length === 0)}
                 className="btn-primary"
               >
                 {importing ? (
@@ -369,7 +535,7 @@ export default function ImportPage() {
                     <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
                     {progress
                       ? (progress.batch_total > 1 && progress.batch_index >= 1
-                          ? `Batch ${progress.batch_index}/${progress.batch_total} · ${progress.percent}%`
+                          ? `${stepWord} ${progress.batch_index}/${progress.batch_total} · ${progress.percent}%`
                           : `Working… ${progress.percent}%`)
                       : (isPdf ? 'Parsing PDF...' : 'Reading file...')}
                   </>
@@ -406,6 +572,66 @@ export default function ImportPage() {
                 </p>
               </div>
             </div>
+
+            {/* One line per sheet. A workbook import is several batches, and a
+                single total hides the one sheet that came back empty — which is
+                the only line anyone needs to act on. */}
+            {result.sheets?.length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/60 text-xs text-slate-500">
+                      <th className="px-3 py-2 text-left font-medium">Sheet</th>
+                      <th className="px-3 py-2 text-right font-medium">Rows read</th>
+                      <th className="px-3 py-2 text-right font-medium">Staged</th>
+                      <th className="px-3 py-2 text-right font-medium">Already seen</th>
+                      <th className="px-3 py-2 text-right font-medium">Batch</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {result.sheets.map((s) => (
+                      <tr key={s.sheet || 'file'} className={s.error ? 'bg-amber-50/60' : ''}>
+                        <td className="px-3 py-2">
+                          <span className="font-medium text-slate-800">
+                            {s.sheet || file?.name}
+                          </span>
+                          {s.error && (
+                            <span className="mt-0.5 block text-xs text-amber-700">{s.error}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                          {s.parsed.toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-900">
+                          {s.staged.toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                          {s.duplicate_rows ? s.duplicate_rows.toLocaleString('en-IN') : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                          {s.batch_id ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Sheets present in the file that were not imported, so a tab left
+                unticked by accident does not just quietly not appear. */}
+            {statementSheetCount > result.sheets_imported && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-700">
+                  Imported <span className="font-medium">
+                    {result.sheets_imported} of {statementSheetCount}
+                  </span> statement sheets in this workbook.
+                  {' '}Upload the file again and tick the others to add them —
+                  each sheet is staged separately, so nothing already imported is
+                  affected.
+                </p>
+              </div>
+            )}
 
             {/* Only when part of the file was read — otherwise the whole file
                 is the obvious answer and saying so is noise. */}
