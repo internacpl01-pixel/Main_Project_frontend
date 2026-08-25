@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
-  importBeneficiaries, deleteAllBeneficiaries,
+  importBeneficiaries, deleteAllBeneficiaries, fetchProjects,
 } from '../api/endpoints.js'
 import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
@@ -14,6 +14,18 @@ import { Plus, Pencil, Trash2, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, C
 // table config; adding a column server-side then left the UI showing the old
 // set until someone remembered to edit it here too.
 const PAGE_SIZE = 25
+
+// Dropdown sources that are not master types. A master type is fetched through
+// /master/{key} and describes itself in the schema; anything here brings its own
+// fetcher and its own display column.
+//
+// Projects are here rather than in the backend's _TABLES because /projects
+// applies scoping — a member sees the projects they are on. Exposing them as a
+// master type would list every project to everyone, which is precisely what
+// that scoping prevents.
+const EXTERNAL_OPTION_SOURCES = {
+  project: { fetch: fetchProjects, labelField: 'name' },
+}
 
 const blankForm = (config) =>
   Object.fromEntries((config?.fields || []).map((f) => [f.key, '']))
@@ -100,9 +112,9 @@ export default function MasterDataPage() {
 
     let cancelled = false
     Promise.all(types.map((t) =>
-      fetchMasterData(t)
+      (EXTERNAL_OPTION_SOURCES[t]?.fetch ?? (() => fetchMasterData(t)))()
         .then((rows) => [t, Array.isArray(rows) ? rows : []])
-        // One failed list must not blank the other two: the field falls back to
+        // One failed list must not blank the others: that field falls back to
         // an empty dropdown and the rest of the form still works.
         .catch(() => [t, []])
     )).then((pairs) => {
@@ -120,8 +132,9 @@ export default function MasterDataPage() {
   // 'DPL — DWARKADHIS PROJECTS PRIVATE LIMITED'.
   const optionsFor = useCallback((field) => {
     if (!field.options_from) return []
+    const external = EXTERNAL_OPTION_SOURCES[field.options_from]
     const type = schema.find((s) => s.key === field.options_from)
-    const labelField = type?.label_field || 'name'
+    const labelField = external?.labelField || type?.label_field || 'name'
     const valueField = field.options_value || labelField
 
     const all = (optionSets[field.options_from] || [])

@@ -304,6 +304,13 @@ export async function fetchTransactions(params = {}) {
 // Alias used by Dashboard and Export pages
 export const fetchSummary = () => fetchTransactionSummary()
 
+// Empty the ledger. Company admin only. Recoverable in the sense that matters:
+// the staged rows keep their classification and can be posted again.
+export async function deleteAllTransactions() {
+  const { data } = await api.delete('/transactions/all')
+  return data
+}
+
 export async function fetchTransactionSummary() {
   const { data } = await api.get('/transactions/summary')
   return data

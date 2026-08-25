@@ -9,6 +9,7 @@ import FieldMappingPage from './pages/FieldMappingPage.jsx'
 import ChangeLogPage from './pages/ChangeLogPage.jsx'
 import MasterDataPage from './pages/MasterDataPage.jsx'
 import StagingPage from './pages/StagingPage.jsx'
+import LedgerPage from './pages/LedgerPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
 import ExportPage from './pages/ExportPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="master-data" element={<CompanyRoute><MasterDataPage /></CompanyRoute>} />
         <Route path="import" element={<CompanyRoute><ImportPage /></CompanyRoute>} />
         <Route path="staging" element={<CompanyRoute><StagingPage /></CompanyRoute>} />
+        <Route path="ledger" element={<CompanyRoute><LedgerPage /></CompanyRoute>} />
         <Route path="export" element={<CompanyRoute><ExportPage /></CompanyRoute>} />
         <Route path="users" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><UsersPage /></LevelRoute></CompanyRoute>} />
         <Route path="companies" element={<LevelRoute requiredLevel={SUPER_ADMIN}><CompaniesPage /></LevelRoute>} />
