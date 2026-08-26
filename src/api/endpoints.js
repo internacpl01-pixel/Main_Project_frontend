@@ -352,6 +352,16 @@ export async function clearTempTrans() {
   return data
 }
 
+// Edit one staged row. `payload` carries only the fields being changed:
+// project_id / head_id / rera_head_id / idw_head_id (master row ids, or null to
+// clear) and narration (free text). A key that is absent is left alone, which
+// is what makes this safe to call with a partial form — and unlike classify,
+// it can be run on the same row as many times as it needs.
+export async function updateTempRow(rowId, payload) {
+  const { data } = await api.patch(`/transactions/temp-trans/${rowId}`, payload)
+  return data
+}
+
 export async function classifyRow(rowId, payload) {
   const { data } = await api.post(`/transactions/temp-trans/${rowId}/classify`, payload)
   return data

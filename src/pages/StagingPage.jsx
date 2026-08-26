@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
-  classifyRow, finalizeRow, clearTempTrans, deleteTempRow,
+  updateTempRow, clearTempTrans, deleteTempRow,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -13,26 +13,29 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { CheckCircle, Loader2, Sparkles, AlertCircle, RefreshCw, Tag, Trash2, X } from 'lucide-react'
+import { Sparkles, RefreshCw, Pencil, Trash2, X } from 'lucide-react'
 
-// Every dropdown on this page is a live read of one of the company's own
-// tables. `master` is the master_type the API takes; `label` is only what the
-// form field is called. There is deliberately no fallback list and no default
-// id — a company that has not created any heads yet gets an empty dropdown and
-// a link to Master Data, not a guess.
+// The four dropdowns on the edit dialog. Each is a live read of one of the
+// company's own tables — no fallback list and no default id, so a company that
+// has not created any heads yet gets an empty dropdown and a reason, not a
+// guess.
+//
+// `mirrors` is the key the server uses for the display column this field
+// writes, so the dialog can show what the row currently holds and preselect it.
+// Which physical column that is comes from the fieldmap, in `editable` on the
+// list response — nothing here is keyed to the words "BUSINESS UNIT".
 const PICKERS = [
-  { key: 'project_id',      source: 'projects',    label: 'Project',     hint: 'Which project this transaction belongs to' },
-  { key: 'head_id',         master: 'head',        label: 'Head',        hint: 'Your own expense/income category' },
-  { key: 'rera_head_id',    master: 'rera_head',   label: 'RERA Head',   hint: 'Category as reported under RERA' },
-  { key: 'idw_head_id',     master: 'idw_head',    label: 'TCP Head',    hint: 'Category as reported under TCP' },
-  { key: 'beneficiary_id',  master: 'beneficiary', label: 'Beneficiary', hint: 'Who was paid, or who paid you' },
+  { key: 'project_id',   mirrors: 'project',   source: 'projects',  label: 'Business Unit', hint: 'From the Project table' },
+  { key: 'head_id',      mirrors: 'head',      master: 'head',      label: 'Head',          hint: 'From the Internal Head table' },
+  { key: 'rera_head_id', mirrors: 'rera_head', master: 'rera_head', label: 'Type for RERA IDW', hint: 'From the RERA Head table' },
+  { key: 'idw_head_id',  mirrors: 'idw_head',  master: 'idw_head',  label: 'TCP Head',      hint: 'From the TCP Head table' },
 ]
 
-// At least one of the three heads has to be set — the same rule the API
-// enforces, checked here so the user is told before the request goes out.
-const HEAD_KEYS = ['head_id', 'rera_head_id', 'idw_head_id']
-
-const EMPTY_FORM = { project_id: '', head_id: '', rera_head_id: '', idw_head_id: '', beneficiary_id: '' }
+// Sent when a field's current value is not in its master table. It means "leave
+// this exactly as the statement had it" — distinct from '' , which clears the
+// field, and from an id, which replaces it. Without it the only way to keep an
+// imported value the master does not know about would be to not open the dialog.
+const KEEP = '__keep__'
 
 export default function StagingPage() {
   const { canWrite } = useAuth()
@@ -44,8 +47,6 @@ export default function StagingPage() {
   const [clearOpen, setClearOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId] = useState(null)
-  const [filter, setFilter] = useState('pending') // pending | classified | all
 
   // The row the delete dialog is about, or null.
   const [doomed, setDoomed] = useState(null)
@@ -90,9 +91,16 @@ export default function StagingPage() {
   const [options, setOptions] = useState({})
   const [optionsLoading, setOptionsLoading] = useState(true)
 
-  const [target, setTarget] = useState(null) // the row being classified
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [target, setTarget] = useState(null) // the row being edited
+  const [form, setForm] = useState({})
+  // What the form looked like when it opened, so only what actually changed is
+  // sent. A PATCH that resends every field would overwrite a value another
+  // person edited between this dialog opening and being saved.
+  const [initialForm, setInitialForm] = useState({})
   const [saving, setSaving] = useState(false)
+  // Which display column each editable field writes, from the company's own
+  // fieldmap. The dialog is built from this rather than from names in this file.
+  const [editable, setEditable] = useState({})
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -113,6 +121,10 @@ export default function StagingPage() {
         // bank_master — which this page never reads.
         next[p.key] = (Array.isArray(results[i]) ? results[i] : []).map((o) => ({
           id: o.id,
+          // The bare name as well as the label: a row imported from a
+          // spreadsheet carries the master's NAME in its display column and no
+          // id, so the name is what the dialog matches on to preselect.
+          name: o.name,
           label: o.code ? `${o.name} (${o.code})` : o.name,
         }))
       })
@@ -127,8 +139,6 @@ export default function StagingPage() {
     setLoading(true)
     try {
       const params = { page, limit, ...filterParams(filters) }
-      if (filter === 'pending') params.classified = false
-      if (filter === 'classified') params.classified = true
       if (query.trim()) params.search = query.trim()
       if (sort) { params.sort = sort; params.dir = dir }
       // The server decides the column set — it is read from the live
@@ -138,6 +148,7 @@ export default function StagingPage() {
       setColumns(data.columns || [])
       setRows(data.rows || [])
       setSummary(data.summary || null)
+      setEditable(data.editable || {})
       setTerms(data.search_terms || [])
       setTotal(data.total ?? 0)
       // The server reports the sort it actually applied, which is not always
@@ -150,7 +161,7 @@ export default function StagingPage() {
     } finally {
       setLoading(false)
     }
-  }, [filter, query, page, limit, sort, dir, filters])
+  }, [query, page, limit, sort, dir, filters])
 
   useEffect(() => { load() }, [load])
 
@@ -180,51 +191,66 @@ export default function StagingPage() {
 
   const handleFilters = (next) => { setFilters(next); setPage(1) }
 
-  const openClassify = (row) => {
-    setTarget(row)
-    // Pre-fill from whatever the row already carries, so re-opening the dialog
-    // shows the current state instead of a blank form.
-    setForm({
-      project_id: row.project_id ?? '',
-      head_id: row.head_id ?? '',
-      rera_head_id: row.rera_head_id ?? '',
-      idw_head_id: row.idw_head_id ?? '',
-      beneficiary_id: row.beneficiary_id ?? '',
-    })
+  // The value a dropdown should start on for this row.
+  //
+  // The id if the row carries one. Otherwise the master entry whose name equals
+  // what is in the display column — rows imported from a spreadsheet arrive with
+  // 'Casa Romana' in the text column and no project_id, and matching the two
+  // means the dialog opens on the value already on screen instead of blank.
+  //
+  // KEEP when the column holds something no master entry matches. Those values
+  // came out of the statement and are not this dialog's to discard.
+  const startingValue = (row, picker) => {
+    const id = row[picker.key]
+    if (id !== null && id !== undefined && id !== '') return String(id)
+    const column = editable[picker.mirrors]?.column
+    const current = column ? row[column] : null
+    if (!current) return ''
+    const hit = (options[picker.key] || []).find(
+      (o) => String(o.name).trim().toLowerCase() === String(current).trim().toLowerCase()
+    )
+    return hit ? String(hit.id) : KEEP
   }
 
-  const handleClassify = async () => {
-    if (!HEAD_KEYS.some((k) => form[k])) {
-      toast.error('Pick at least one of Head, RERA Head or TCP Head.')
+  const openEdit = (row) => {
+    const next = {}
+    PICKERS.forEach((p) => { next[p.key] = startingValue(row, p) })
+    const narrationCol = editable.narration?.column
+    next.narration = (narrationCol ? row[narrationCol] : '') || ''
+    setTarget(row)
+    setForm(next)
+    setInitialForm(next)
+  }
+
+  const handleSaveEdit = async () => {
+    // Only what changed. KEEP never goes out: it means the field was left as
+    // the statement had it, and sending anything for it would replace a value
+    // this dialog could not offer in the first place.
+    const payload = {}
+    PICKERS.forEach((p) => {
+      const now = form[p.key]
+      if (now === initialForm[p.key] || now === KEEP) return
+      payload[p.key] = now === '' ? null : Number(now)
+    })
+    if (form.narration !== initialForm.narration) {
+      payload.narration = form.narration
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setTarget(null)
       return
     }
+
     setSaving(true)
     try {
-      // Blank selects are dropped rather than sent as null, so the API only
-      // ever receives the fields the user actually chose.
-      const payload = {}
-      Object.entries(form).forEach(([k, v]) => { if (v !== '' && v !== null) payload[k] = Number(v) })
-      await classifyRow(target.id, payload)
-      toast.success('Row classified')
+      await updateTempRow(target.id, payload)
+      toast.success('Row updated')
       setTarget(null)
       load()
     } catch (err) {
       toast.error(err.message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleFinalize = async (row) => {
-    setBusyId(`f-${row.id}`)
-    try {
-      await finalizeRow(row.id)
-      toast.success('Row posted to the ledger')
-      load()
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setBusyId(null)
     }
   }
 
@@ -328,14 +354,16 @@ export default function StagingPage() {
     return parts.length ? parts.join(' · ') : `row ${row.row_number} of batch ${row.batch_id}`
   }
 
+  // Every dropdown empty means Master Data has nothing to pick from yet, which
+  // is worth saying once rather than four times inside the dialog.
   const noOptionsAtAll = !optionsLoading &&
-    HEAD_KEYS.every((k) => (options[k] || []).length === 0)
+    PICKERS.every((p) => (options[p.key] || []).length === 0)
 
   return (
     <div>
       <PageHeader
         title="Imported Rows"
-        description="Everything parsed out of your statements, in temp_trans. Tag a row and post it to the ledger."
+        description="Everything parsed out of your statements, in temp_trans. Edit a row to set its Business Unit, Head, RERA and TCP categories, or its narration."
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -373,26 +401,10 @@ export default function StagingPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          {['pending', 'classified', 'all'].map((f) => (
-            <button
-              key={f}
-              // Page reset in the same click as the filter, for the same reason
-              // the search debounce does it: page 7 of "pending" is rarely a
-              // page of "classified".
-              onClick={() => { setFilter(f); setPage(1) }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize ${
-                filter === f
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-
+      {/* No Pending / Classified tabs. They filtered on is_classified, which
+          only the Classify button ever set — with that gone the Classified tab
+          could only ever show an empty table. */}
+      <div className="flex flex-wrap items-center justify-end gap-3 mb-4">
         {/* Searched in SQL, not here. The browser only ever holds one page, so
             filtering client-side could never find a match on any other page —
             this looks at every staged row and pages the matches. */}
@@ -409,7 +421,7 @@ export default function StagingPage() {
           {query && !loading && (
             <p className="mt-1 px-1 text-xs text-slate-500">
               {total === 0
-                ? `No ${filter === 'all' ? '' : `${filter} `}row matches`
+                ? 'No row matches'
                 : `${total.toLocaleString('en-IN')} ${total === 1 ? 'row matches' : 'rows match'}`}
               {' across every page'}
               {terms.length > 1 ? ' · all words must appear' : ''}
@@ -469,23 +481,15 @@ export default function StagingPage() {
                     BUSINESS UNIT, and the three heads into HEAD, TYPE FOR RERA
                     IDW and TCP Head — so a separate tag list repeated what the
                     data columns already say. */}
-                <SortHeader
-                  field="is_classified"
-                  label="Status"
-                  sort={sort}
-                  dir={dir}
-                  onSort={handleSort}
-                  align="center"
-                />
                 <th className="text-right px-6 py-3 text-xs font-medium text-slate-500 tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={columns.length + 2} className="px-6 py-12"><Spinner /></td></tr>
+                <tr><td colSpan={columns.length + 1} className="px-6 py-12"><Spinner /></td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 2}>
+                  <td colSpan={columns.length + 1}>
                     {/* An empty table has three different causes and they need
                         three different next steps — nothing imported, a search
                         that matched nothing, or a filter left on from earlier.
@@ -497,9 +501,9 @@ export default function StagingPage() {
                       }
                       description={
                         query && activeCount(filters)
-                          ? `Nothing in the ${filter} rows matches "${query}" within the filters you have set.`
+                          ? `Nothing matches "${query}" within the filters you have set.`
                           : query
-                            ? `Nothing in the ${filter} rows matches "${query}".`
+                            ? `Nothing matches "${query}".`
                             : activeCount(filters)
                               ? `${summary?.staged_total ?? 0} rows are staged, but none of them match the filters you have set.`
                               : 'When you import a statement, rows land here for review.'
@@ -560,51 +564,32 @@ export default function StagingPage() {
                           )}
                         </td>
                       ))}
-                      <td className="px-6 py-3 text-center align-top">
-                        {row.is_classified ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                            <CheckCircle className="h-3.5 w-3.5" />
-                            Classified
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs text-amber-600">
-                            <AlertCircle className="h-3.5 w-3.5" />
-                            Pending
-                          </span>
-                        )}
-                      </td>
+                      {/* Edit and delete, the same pair the master tables use.
+                          No Classify and no Post to Ledger: a staged row is
+                          edited in place now rather than filled in once and
+                          frozen. */}
                       <td className="px-6 py-3 align-top">
                         <div className="flex items-center justify-end gap-1">
-                          {canWrite && !row.is_classified && (
-                            <button
-                              onClick={() => openClassify(row)}
-                              className="btn btn-sm btn-secondary text-xs"
-                            >
-                              <Tag className="h-3 w-3 mr-1" />
-                              Classify
-                            </button>
+                          {canWrite ? (
+                            <>
+                              <button
+                                onClick={() => openEdit(row)}
+                                title="Edit this row"
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-primary-50 hover:text-primary-600 transition-colors"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setDoomed(row)}
+                                title="Remove this staged row"
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
                           )}
-                          {canWrite && row.is_classified && (
-                            <button
-                              onClick={() => handleFinalize(row)}
-                              disabled={busyId === `f-${row.id}`}
-                              className="btn btn-sm btn-primary text-xs"
-                            >
-                              {busyId === `f-${row.id}`
-                                ? <Loader2 className="h-3 w-3 animate-spin" />
-                                : 'Post to Ledger'}
-                            </button>
-                          )}
-                          {canWrite && (
-                            <button
-                              onClick={() => setDoomed(row)}
-                              title="Remove this staged row"
-                              className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                          {!canWrite && <span className="text-xs text-slate-300">—</span>}
                         </div>
                       </td>
                     </tr>
@@ -626,16 +611,15 @@ export default function StagingPage() {
       <Modal
         isOpen={!!target}
         onClose={() => setTarget(null)}
-        title="Classify Row"
+        title="Edit Row"
         size="lg"
       >
         {target && (
           <div className="space-y-4">
-            {/* Built from the live column set, like the table behind it. The
-                previous version read target.description and target.txn_date by
-                name; both columns are gone, so this panel showed
-                "(no description)" above a blank line for every row. */}
-            <div className="rounded-lg bg-slate-50 px-4 py-3">
+            {/* The row as it stands, built from the live column set. Read-only:
+                everything below the divider is the statement as the bank sent
+                it, and this dialog does not rewrite that. */}
+            <div className="rounded-lg bg-slate-50 px-4 py-3 max-h-52 overflow-y-auto">
               {populated(target).length === 0 ? (
                 <p className="text-sm text-slate-400">
                   This row parsed with no values — row {target.row_number} of batch {target.batch_id}.
@@ -661,20 +645,31 @@ export default function StagingPage() {
             ) : (
               PICKERS.map((p) => {
                 const list = options[p.key] || []
+                // What the row holds in this field's display column right now.
+                // Its own column per company, named by the fieldmap.
+                const column = editable[p.mirrors]?.column
+                const current = column ? target[column] : null
+                const heading = editable[p.mirrors]?.label || p.label
+                const unmatched = form[p.key] === KEEP
                 return (
                   <div key={p.key}>
-                    <label className="label">
-                      {p.label}
-                      {HEAD_KEYS.includes(p.key) && <span className="text-slate-400 font-normal"> — one of these three</span>}
-                    </label>
+                    <label className="label">{heading}</label>
                     <select
-                      value={form[p.key]}
+                      value={form[p.key] ?? ''}
                       onChange={(e) => setForm({ ...form, [p.key]: e.target.value })}
                       className="input"
-                      disabled={list.length === 0}
+                      disabled={list.length === 0 && !unmatched}
                     >
+                      {/* Offered only when the imported value is not in the
+                          master table. Picking anything else replaces it; this
+                          is how you say "leave what the statement had". */}
+                      {unmatched && (
+                        <option value={KEEP}>Keep "{current}" — not in {heading}</option>
+                      )}
                       <option value="">
-                        {list.length === 0 ? `No ${p.label.toLowerCase()} entries yet` : `Select ${p.label.toLowerCase()}...`}
+                        {list.length === 0
+                          ? `No ${heading} entries yet — add them under Master Data`
+                          : '— none —'}
                       </option>
                       {list.map((o) => (
                         <option key={o.id} value={o.id}>{o.label}</option>
@@ -686,10 +681,27 @@ export default function StagingPage() {
               })
             )}
 
+            {editable.narration ? (
+              <div>
+                <label className="label">{editable.narration.label}</label>
+                <textarea
+                  value={form.narration ?? ''}
+                  onChange={(e) => setForm({ ...form, narration: e.target.value })}
+                  rows={3}
+                  className="input resize-y"
+                  placeholder="Typed by hand — this one has no master table behind it."
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">
+                This company has no narration column, so there is nothing to type here.
+              </p>
+            )}
+
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setTarget(null)} className="btn-secondary text-sm">Cancel</button>
-              <button onClick={handleClassify} disabled={saving || optionsLoading} className="btn-primary text-sm">
-                {saving ? 'Saving...' : 'Classify'}
+              <button onClick={handleSaveEdit} disabled={saving || optionsLoading} className="btn-primary text-sm">
+                {saving ? 'Saving...' : 'Save changes'}
               </button>
             </div>
           </div>
