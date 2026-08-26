@@ -131,20 +131,30 @@ function Popover({ icon, label, summary, active, disabled, disabledHint, childre
 function ValueList({ facet, value, onPick, close, unit }) {
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
-  const shown = (facet.values || []).filter(
-    (v) => !needle || String(v.value).toLowerCase().includes(needle)
-  )
+  // Searched on both, because the two are different questions. The label is
+  // how the account is known — "master", "dpl" — and the raw number is what
+  // someone pastes in from a statement.
+  const shown = (facet.values || []).filter((v) => !needle
+    || String(v.value).toLowerCase().includes(needle)
+    || String(v.label || '').toLowerCase().includes(needle))
 
-  const Row = ({ picked, onClick, children, count }) => (
+  const Row = ({ picked, onClick, children, count, sub }) => (
     <button
       type="button"
       onClick={onClick}
       className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5
         text-left text-sm hover:bg-slate-50 ${picked ? 'bg-primary-50 text-primary-700' : 'text-slate-700'}`}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <Check className={`h-3.5 w-3.5 shrink-0 ${picked ? '' : 'invisible'}`} />
-        <span className="truncate font-mono text-xs">{children}</span>
+      <span className="flex min-w-0 items-start gap-1.5">
+        <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${picked ? '' : 'invisible'}`} />
+        <span className="min-w-0">
+          <span className="block truncate font-mono text-xs">{children}</span>
+          {/* The full number, kept under the label rather than replaced by it.
+              A label ending 0264 is what you recognise; the digits are what you
+              check against the statement, and losing them would make two
+              accounts with the same tail impossible to tell apart. */}
+          {sub && <span className="block truncate font-mono text-[11px] text-slate-400">{sub}</span>}
+        </span>
       </span>
       {count !== undefined && <span className="shrink-0 text-xs text-slate-400">{count}</span>}
     </button>
@@ -188,9 +198,21 @@ function ValueList({ facet, value, onPick, close, unit }) {
             key={v.value}
             picked={value === v.value}
             count={v.count}
+            // Only when the label is not just the number repeated — an account
+            // with no Bank row keeps its digits as the label, and printing them
+            // twice says nothing.
+            sub={v.label && v.label !== v.value ? v.value : undefined}
             onClick={() => { onPick(v.value); close() }}
           >
-            {v.value}
+            {v.label || v.value}
+            {/* An account no Bank row carries is also an account whose Company
+                can never be filled in. Flagged here because this list is where
+                you notice it. */}
+            {v.in_bank_master === false && (
+              <span className="ml-1.5 rounded bg-amber-100 px-1 py-px font-sans text-[10px] font-medium text-amber-700">
+                not in Bank
+              </span>
+            )}
           </Row>
         ))}
 
@@ -283,7 +305,12 @@ export function FilterBar({ options, value, onChange, loading = false, className
       <Popover
         icon={<Hash className="h-3.5 w-3.5" />}
         label={account?.label || 'Account Number'}
-        summary={f.account === NO_VALUE ? '(not set)' : f.account}
+        // The label, not the digits: the chip is narrow and truncates, so
+        // fifteen digits would show as the leading eight — the half that is
+        // identical across every account this company holds.
+        summary={f.account === NO_VALUE
+          ? '(not set)'
+          : (account?.values || []).find((v) => v.value === f.account)?.label || f.account}
         active={!!f.account}
         disabled={loading || !account}
         disabledHint={hint('This company has no account number field mapped.')}
