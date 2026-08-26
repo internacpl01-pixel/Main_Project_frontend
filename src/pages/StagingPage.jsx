@@ -13,7 +13,7 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Sparkles, RefreshCw, Pencil, Trash2, X } from 'lucide-react'
+import { Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter } from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
 // company's own tables — no fallback list and no default id, so a company that
@@ -102,18 +102,21 @@ export default function StagingPage() {
   // fieldmap. The dialog is built from this rather than from names in this file.
   const [editable, setEditable] = useState({})
 
-  // The row just edited, marked so it can be found again.
+  // Every row edited since this page was opened, kept yellow.
   //
   // Saving reloads the whole page of rows, and on a table this wide the one
   // cell that changed is usually off-screen — so a successful edit looked
-  // exactly like nothing happening. The row is scrolled back into view and held
-  // yellow for a few seconds, then fades.
-  const [flashId, setFlashId] = useState(null)
+  // exactly like nothing happening.
+  //
+  // The yellow stays rather than fading. A highlight on a timer is only useful
+  // if you happen to be looking when it fires; these are also a record of what
+  // has been touched, which is the more useful thing on a table of a thousand
+  // rows being worked through a few at a time. Refresh clears them, and so does
+  // the button that appears beside it.
+  const [editedIds, setEditedIds] = useState(() => new Set())
+  // The most recent one, which is the one worth scrolling to.
+  const [lastEdited, setLastEdited] = useState(null)
   const flashRow = useRef(null)
-  const flashTimer = useRef(null)
-
-  // A pending fade must not fire into an unmounted component.
-  useEffect(() => () => clearTimeout(flashTimer.current), [])
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -216,10 +219,12 @@ export default function StagingPage() {
   // and 'nearest' leaves a row that is technically visible sitting against the
   // edge of the viewport, which is not the same as being found.
   useEffect(() => {
-    if (flashId && flashRow.current) {
+    if (lastEdited && flashRow.current) {
       flashRow.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }
-  }, [flashId, rows])
+  }, [lastEdited, rows])
+
+  const clearHighlights = () => { setEditedIds(new Set()); setLastEdited(null) }
 
   // The value a dropdown should start on for this row.
   //
@@ -281,14 +286,17 @@ export default function StagingPage() {
       // Sorting by a column that was just edited can move the row to another
       // page. Saying so is the difference between "my edit did not save" and
       // "my edit moved the row", which look identical otherwise.
+      setEditedIds((prev) => new Set(prev).add(editedId))
+
       const stillHere = (data?.rows || []).some((r) => r.id === editedId)
       if (stillHere) {
         toast.success('Row updated')
-        setFlashId(editedId)
-        clearTimeout(flashTimer.current)
-        flashTimer.current = setTimeout(() => setFlashId(null), 4000)
+        setLastEdited(editedId)
       } else {
-        setFlashId(null)
+        // Nothing to scroll to and nothing to light up, which on its own looks
+        // exactly like the save having failed. It stays in the set, so it is
+        // still yellow wherever it went.
+        setLastEdited(null)
         toast.success('Row updated - it has moved off this page under the current sort or filters.')
       }
     } catch (err) {
@@ -410,8 +418,21 @@ export default function StagingPage() {
         description="Everything parsed out of your statements, in temp_trans. Edit a row to set its Business Unit, Head, RERA and TCP categories, or its narration."
         actions={
           <div className="flex items-center gap-2">
+            {/* Only while something is lit. The yellow does not time out, so
+                there has to be a way to put it back that is not "reload the
+                page and hope". */}
+            {editedIds.size > 0 && (
+              <button
+                onClick={clearHighlights}
+                title="Stop highlighting the rows edited so far"
+                className="btn-sm inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 hover:bg-amber-100"
+              >
+                <Highlighter className="h-3.5 w-3.5 mr-1" />
+                Clear {editedIds.size} highlight{editedIds.size === 1 ? '' : 's'}
+              </button>
+            )}
             <button
-              onClick={() => { load(); loadFilterOptions() }}
+              onClick={() => { load(); loadFilterOptions(); clearHighlights() }}
               className="btn-secondary btn-sm"
             >
               <RefreshCw className="h-3.5 w-3.5 mr-1" />
@@ -576,16 +597,14 @@ export default function StagingPage() {
                 </tr>
               ) : (
                 rows.map((row) => (
-                    // The yellow is dropped rather than switched off, so the
-                    // duration-700 transition carries it back to white instead
-                    // of blinking. hover: is left out while it is lit, or
-                    // pointing at the row would cancel the very highlight that
-                    // is there to find it.
+                    // hover: is left out while a row is lit, or pointing at it
+                    // would grey out the very highlight that marks it as edited.
                     <tr
                       key={row.id}
-                      ref={row.id === flashId ? flashRow : undefined}
+                      ref={row.id === lastEdited ? flashRow : undefined}
+                      title={editedIds.has(row.id) ? 'Edited since this page was opened' : undefined}
                       className={`transition-colors duration-700 ${
-                        row.id === flashId
+                        editedIds.has(row.id)
                           ? 'bg-amber-100 ring-1 ring-inset ring-amber-300'
                           : 'hover:bg-slate-50/70'
                       }`}
