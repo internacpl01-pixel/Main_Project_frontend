@@ -8,6 +8,7 @@ import {
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
 import SuperAdminHome from '../pages/SuperAdminHome.jsx'
+import { GreetingTicker } from './GreetingTicker.jsx'
 
 // Every route in App.jsx has an entry here. Projects and Master Data were
 // previously reachable only through links buried on the dashboard, which meant
@@ -148,7 +149,23 @@ export default function Layout() {
       <div className="lg:pl-60">
         {/* Header */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-slate-200 h-14">
-          <div className="flex items-center justify-between px-4 h-full">
+          <div className="relative flex items-center justify-between px-4 h-full">
+            {/* Centred on the bar itself rather than placed between the two
+                groups beside it: those are different widths, so a flex child in
+                the middle would sit off-centre and drift as the company name
+                or username changed length.
+
+                pointer-events-none because it is text, not a control, and it
+                overlaps the row — without it the invisible half of this box
+                would swallow clicks meant for the profile menu.
+
+                Hidden below md, where the bar has no room to spare. */}
+            <div className="pointer-events-none absolute inset-0 hidden md:flex items-center justify-center">
+              <GreetingTicker
+                username={user?.username}
+                companyName={isSuperAdmin ? null : (user?.companyName || null)}
+              />
+            </div>
             <div className="flex items-center gap-3">
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 rounded hover:bg-slate-100 text-slate-500">
                 <Menu className="h-5 w-5" />
