@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow,
@@ -102,6 +102,19 @@ export default function StagingPage() {
   // fieldmap. The dialog is built from this rather than from names in this file.
   const [editable, setEditable] = useState({})
 
+  // The row just edited, marked so it can be found again.
+  //
+  // Saving reloads the whole page of rows, and on a table this wide the one
+  // cell that changed is usually off-screen — so a successful edit looked
+  // exactly like nothing happening. The row is scrolled back into view and held
+  // yellow for a few seconds, then fades.
+  const [flashId, setFlashId] = useState(null)
+  const flashRow = useRef(null)
+  const flashTimer = useRef(null)
+
+  // A pending fade must not fire into an unmounted component.
+  useEffect(() => () => clearTimeout(flashTimer.current), [])
+
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
   useEffect(() => {
@@ -156,6 +169,10 @@ export default function StagingPage() {
       // falls back to the natural order. Following it keeps the header arrow
       // honest instead of pointing at a column nothing was ordered by.
       if ((data.sort ?? null) !== sort) { setSort(data.sort ?? null) }
+      // Returned as well as stored: the caller that just saved an edit needs to
+      // know whether its row came back on this page, and reading `rows` state
+      // straight after setting it would still see the previous render's value.
+      return data
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -190,6 +207,19 @@ export default function StagingPage() {
   }
 
   const handleFilters = (next) => { setFilters(next); setPage(1) }
+
+  // Scroll the flashed row back under the eye. Keyed on `rows` as well as the
+  // id, because the ref only points at a real node once the reloaded page has
+  // rendered — running this the moment the id is set would find nothing.
+  //
+  // block:'center' rather than the default: this table scrolls sideways too,
+  // and 'nearest' leaves a row that is technically visible sitting against the
+  // edge of the viewport, which is not the same as being found.
+  useEffect(() => {
+    if (flashId && flashRow.current) {
+      flashRow.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [flashId, rows])
 
   // The value a dropdown should start on for this row.
   //
@@ -242,11 +272,25 @@ export default function StagingPage() {
     }
 
     setSaving(true)
+    const editedId = target.id
     try {
-      await updateTempRow(target.id, payload)
-      toast.success('Row updated')
+      await updateTempRow(editedId, payload)
       setTarget(null)
-      load()
+      const data = await load()
+
+      // Sorting by a column that was just edited can move the row to another
+      // page. Saying so is the difference between "my edit did not save" and
+      // "my edit moved the row", which look identical otherwise.
+      const stillHere = (data?.rows || []).some((r) => r.id === editedId)
+      if (stillHere) {
+        toast.success('Row updated')
+        setFlashId(editedId)
+        clearTimeout(flashTimer.current)
+        flashTimer.current = setTimeout(() => setFlashId(null), 4000)
+      } else {
+        setFlashId(null)
+        toast.success('Row updated - it has moved off this page under the current sort or filters.')
+      }
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -532,7 +576,20 @@ export default function StagingPage() {
                 </tr>
               ) : (
                 rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
+                    // The yellow is dropped rather than switched off, so the
+                    // duration-700 transition carries it back to white instead
+                    // of blinking. hover: is left out while it is lit, or
+                    // pointing at the row would cancel the very highlight that
+                    // is there to find it.
+                    <tr
+                      key={row.id}
+                      ref={row.id === flashId ? flashRow : undefined}
+                      className={`transition-colors duration-700 ${
+                        row.id === flashId
+                          ? 'bg-amber-100 ring-1 ring-inset ring-amber-300'
+                          : 'hover:bg-slate-50/70'
+                      }`}
+                    >
                       {columns.map((c) => (
                         <td
                           key={c.name}
