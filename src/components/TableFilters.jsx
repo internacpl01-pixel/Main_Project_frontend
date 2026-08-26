@@ -19,19 +19,31 @@ import {
 // string cannot ask for them because an empty param means "no filter".
 export const NO_VALUE = '__none__'
 
-export const EMPTY_FILTERS = { date_from: '', date_to: '', account: '', company: '' }
+// account is a LIST: several accounts can be looked at together, which is the
+// normal question when a company runs one project across two of them.
+export const EMPTY_FILTERS = { date_from: '', date_to: '', account: [], company: '' }
 
 /** Only the filters that are actually set, ready to spread into a request. */
 export function filterParams(f) {
   const out = {}
-  Object.entries(f || {}).forEach(([k, v]) => { if (v) out[k] = v })
+  Object.entries(f || {}).forEach(([k, v]) => {
+    // Joined here rather than left as an array. Axios serialises an array as
+    // `account[]=a&account[]=b`, which FastAPI reads as a parameter literally
+    // named "account[]" and ignores — the filter would silently do nothing.
+    // An account number is digits by the time either side compares it, so a
+    // comma can never occur inside one and needs no escaping.
+    if (Array.isArray(v)) { if (v.length) out[k] = v.join(',') }
+    else if (v) out[k] = v
+  })
   return out
 }
 
 export function activeCount(f) {
-  // A date range is one filter however many of its two ends are filled in.
+  // A date range is one filter however many of its two ends are filled in, and
+  // a list of accounts is one filter however many are ticked.
   const { date_from, date_to, ...rest } = f || {}
-  return (date_from || date_to ? 1 : 0) + Object.values(rest).filter(Boolean).length
+  return (date_from || date_to ? 1 : 0)
+    + Object.values(rest).filter((v) => (Array.isArray(v) ? v.length > 0 : !!v)).length
 }
 
 /**
@@ -127,8 +139,15 @@ function Popover({ icon, label, summary, active, disabled, disabledHint, childre
   )
 }
 
-/** A scrollable, searchable list of distinct values with their row counts. */
-function ValueList({ facet, value, onPick, close, unit }) {
+/**
+ * A scrollable, searchable list of distinct values with their row counts.
+ *
+ * `multiple` turns it into a checklist: picking does not close the panel, so
+ * several can be ticked in one go, and `value` is an array instead of a string.
+ * Single-select keeps closing on pick — with one choice there is nothing left
+ * to do and staying open is a click the user then has to spend.
+ */
+function ValueList({ facet, value, onPick, close, unit, multiple = false }) {
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
   // Searched on both, because the two are different questions. The label is
@@ -138,6 +157,16 @@ function ValueList({ facet, value, onPick, close, unit }) {
     || String(v.value).toLowerCase().includes(needle)
     || String(v.label || '').toLowerCase().includes(needle))
 
+  const chosen = multiple ? (value || []) : (value ? [value] : [])
+  const has = (v) => chosen.includes(v)
+
+  // Toggle when multi, replace when single.
+  const pick = (v) => {
+    if (!multiple) { onPick(v); close(); return }
+    onPick(has(v) ? chosen.filter((x) => x !== v) : [...chosen, v])
+  }
+  const clear = () => { onPick(multiple ? [] : ''); if (!multiple) close() }
+
   const Row = ({ picked, onClick, children, count, sub }) => (
     <button
       type="button"
@@ -146,7 +175,18 @@ function ValueList({ facet, value, onPick, close, unit }) {
         text-left text-sm hover:bg-slate-50 ${picked ? 'bg-primary-50 text-primary-700' : 'text-slate-700'}`}
     >
       <span className="flex min-w-0 items-start gap-1.5">
-        <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${picked ? '' : 'invisible'}`} />
+        {/* A tickable box when several can be on at once, a check when only one
+            can. The control has to say which it is before it is clicked. */}
+        {multiple ? (
+          <span className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center
+            rounded border ${picked
+              ? 'border-primary-600 bg-primary-600 text-white'
+              : 'border-slate-300 bg-white'}`}>
+            {picked && <Check className="h-2.5 w-2.5" strokeWidth={4} />}
+          </span>
+        ) : (
+          <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${picked ? '' : 'invisible'}`} />
+        )}
         <span className="min-w-0">
           <span className="block truncate font-mono text-xs">{children}</span>
           {/* The full number, kept under the label rather than replaced by it.
@@ -176,7 +216,7 @@ function ValueList({ facet, value, onPick, close, unit }) {
       )}
 
       <div className="max-h-64 space-y-0.5 overflow-y-auto">
-        <Row picked={!value} onClick={() => { onPick(''); close() }}>
+        <Row picked={chosen.length === 0} onClick={clear}>
           <span className="font-sans italic text-slate-500">All {unit}</span>
         </Row>
 
@@ -185,9 +225,9 @@ function ValueList({ facet, value, onPick, close, unit }) {
             record carries that account number. */}
         {facet.blank > 0 && (
           <Row
-            picked={value === NO_VALUE}
+            picked={has(NO_VALUE)}
             count={facet.blank}
-            onClick={() => { onPick(NO_VALUE); close() }}
+            onClick={() => pick(NO_VALUE)}
           >
             <span className="font-sans italic text-slate-500">(not set)</span>
           </Row>
@@ -196,13 +236,13 @@ function ValueList({ facet, value, onPick, close, unit }) {
         {shown.map((v) => (
           <Row
             key={v.value}
-            picked={value === v.value}
+            picked={has(v.value)}
             count={v.count}
             // Only when the label is not just the number repeated — an account
             // with no Bank row keeps its digits as the label, and printing them
             // twice says nothing.
             sub={v.label && v.label !== v.value ? v.value : undefined}
-            onClick={() => { onPick(v.value); close() }}
+            onClick={() => pick(v.value)}
           >
             {v.label || v.value}
             {/* An account no Bank row carries is also an account whose Company
@@ -220,6 +260,27 @@ function ValueList({ facet, value, onPick, close, unit }) {
           <p className="px-2 py-3 text-center text-xs text-slate-400">Nothing matches "{q}"</p>
         )}
       </div>
+
+      {/* A multi-select panel stays open, so it needs its own footer: how many
+          are ticked, and a way out that does not depend on knowing you can
+          click elsewhere to close it. */}
+      {multiple && chosen.length > 0 && (
+        <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+          <span className="text-xs text-slate-500">
+            {chosen.length} selected
+          </span>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={clear}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-700">
+              Clear
+            </button>
+            <button type="button" onClick={close}
+                    className="text-xs font-medium text-primary-600 hover:text-primary-700">
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -245,6 +306,16 @@ export function FilterBar({ options, value, onChange, loading = false, className
   // "no such field" hints would be a lie for that second — a company that has
   // the field would be told it does not. Say what is actually true instead.
   const hint = (missing) => (loading ? 'Loading filter values...' : missing)
+
+  // Tolerates a string as well as an array, so a filter state saved before
+  // accounts became multi-select still reads.
+  const accountsChosen = Array.isArray(f.account)
+    ? f.account
+    : (f.account ? [f.account] : [])
+
+  const accountLabel = (v) => (v === NO_VALUE
+    ? '(not set)'
+    : (account?.values || []).find((x) => x.value === v)?.label || v)
 
   const dateSummary = f.date_from && f.date_to
     ? `${f.date_from} → ${f.date_to}`
@@ -305,21 +376,21 @@ export function FilterBar({ options, value, onChange, loading = false, className
       <Popover
         icon={<Hash className="h-3.5 w-3.5" />}
         label={account?.label || 'Account Number'}
-        // The label, not the digits: the chip is narrow and truncates, so
-        // fifteen digits would show as the leading eight — the half that is
-        // identical across every account this company holds.
-        summary={f.account === NO_VALUE
-          ? '(not set)'
-          : (account?.values || []).find((v) => v.value === f.account)?.label || f.account}
-        active={!!f.account}
+        // One account gets named; several get counted. The chip is narrow, and
+        // two labels in it would truncate to neither.
+        summary={accountsChosen.length === 1
+          ? accountLabel(accountsChosen[0])
+          : `${accountsChosen.length} accounts`}
+        active={accountsChosen.length > 0}
         disabled={loading || !account}
         disabledHint={hint('This company has no account number field mapped.')}
       >
         {({ close }) => (
           <ValueList
             facet={account}
-            value={f.account}
+            value={accountsChosen}
             unit="accounts"
+            multiple
             onPick={(v) => set({ account: v })}
             close={close}
           />
