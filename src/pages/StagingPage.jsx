@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
-  updateTempRow, clearTempTrans, deleteTempRow,
+  updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -13,7 +13,9 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter } from 'lucide-react'
+import {
+  Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter, Lock, Unlock,
+} from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
 // company's own tables — no fallback list and no default id, so a company that
@@ -324,6 +326,27 @@ export default function StagingPage() {
       toast.error(err.message)
     } finally {
       setClearing(false)
+    }
+  }
+
+  // Which row's padlock is mid-flight, so a slow network cannot register two
+  // toggles from one impatient double-click.
+  const [lockBusy, setLockBusy] = useState(null)
+
+  const handleToggleLock = async (row) => {
+    setLockBusy(row.id)
+    try {
+      const res = await setTempRowLock(row.id, !row.is_locked)
+      // Patch the one row in place rather than reloading the page of rows: the
+      // padlock answering instantly IS the feedback, and a full reload scrolls
+      // and repaints a wide table to change one boolean.
+      setRows((prev) => prev.map(
+        (r) => (r.id === row.id ? { ...r, is_locked: res.is_locked } : r)
+      ))
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setLockBusy(null)
     }
   }
 
@@ -640,25 +663,48 @@ export default function StagingPage() {
                           )}
                         </td>
                       ))}
-                      {/* Edit and delete, the same pair the master tables use.
-                          No Classify and no Post to Ledger: a staged row is
-                          edited in place now rather than filled in once and
-                          frozen. */}
+                      {/* Lock, edit, delete. The padlock leads because it
+                          decides whether the other two work: a locked row's
+                          edit and delete are disabled with the reason in their
+                          tooltip, and the server refuses them anyway — the
+                          disabled state is a courtesy, the 409 is the rule. */}
                       <td className="px-6 py-3 align-top">
                         <div className="flex items-center justify-end gap-1">
                           {canWrite ? (
                             <>
                               <button
+                                onClick={() => handleToggleLock(row)}
+                                disabled={lockBusy === row.id}
+                                title={row.is_locked
+                                  ? 'Locked — click to unlock and allow editing'
+                                  : 'Unlocked — click to lock this row against edits'}
+                                className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${
+                                  row.is_locked
+                                    ? 'bg-primary-100 text-primary-600 hover:bg-primary-200'
+                                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                                }`}
+                              >
+                                {row.is_locked
+                                  ? <Lock className="h-3.5 w-3.5" />
+                                  : <Unlock className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
                                 onClick={() => openEdit(row)}
-                                title="Edit this row"
-                                className="p-1.5 rounded-lg text-slate-400 hover:bg-primary-50 hover:text-primary-600 transition-colors"
+                                disabled={row.is_locked}
+                                title={row.is_locked
+                                  ? 'This row is locked — unlock it to edit'
+                                  : 'Edit this row'}
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-primary-50 hover:text-primary-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={() => setDoomed(row)}
-                                title="Remove this staged row"
-                                className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                                disabled={row.is_locked}
+                                title={row.is_locked
+                                  ? 'This row is locked — unlock it to delete'
+                                  : 'Remove this staged row'}
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>

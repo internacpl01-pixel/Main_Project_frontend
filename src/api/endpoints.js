@@ -362,6 +362,14 @@ export async function updateTempRow(rowId, payload) {
   return data
 }
 
+// Lock or unlock one staged row. While locked, edit and delete on the row are
+// refused server-side (409), and Clear All refuses while anything is locked —
+// the padlock on screen is a real gate, not a display state.
+export async function setTempRowLock(rowId, locked) {
+  const { data } = await api.post(`/transactions/temp-trans/${rowId}/lock`, { locked })
+  return data
+}
+
 export async function classifyRow(rowId, payload) {
   const { data } = await api.post(`/transactions/temp-trans/${rowId}/classify`, payload)
   return data
