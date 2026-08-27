@@ -672,16 +672,19 @@ export default function StagingPage() {
                         <div className="flex items-center justify-end gap-1">
                           {canWrite ? (
                             <>
+                              {/* Solid blue when locked, a white button when
+                                  unlocked — a filled control reads as "this
+                                  state is ON" in a way a tinted icon did not. */}
                               <button
                                 onClick={() => handleToggleLock(row)}
                                 disabled={lockBusy === row.id}
                                 title={row.is_locked
                                   ? 'Locked — click to unlock and allow editing'
                                   : 'Unlocked — click to lock this row against edits'}
-                                className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${
+                                className={`p-1.5 rounded-lg border transition-colors disabled:opacity-40 ${
                                   row.is_locked
-                                    ? 'bg-primary-100 text-primary-600 hover:bg-primary-200'
-                                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                                    ? 'border-primary-600 bg-primary-600 text-white hover:bg-primary-700'
+                                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                               >
                                 {row.is_locked
