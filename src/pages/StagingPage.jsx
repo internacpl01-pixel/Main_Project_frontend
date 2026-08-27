@@ -11,10 +11,12 @@ import {
   FilterBar, SortHeader, nextSort, EMPTY_FILTERS, filterParams, activeCount,
 } from '../components/TableFilters.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
+import CheckRulesDialog from '../components/CheckRulesDialog.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import {
   Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter, Lock, Unlock,
+  ShieldCheck,
 } from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
@@ -119,6 +121,14 @@ export default function StagingPage() {
   // The most recent one, which is the one worth scrolling to.
   const [lastEdited, setLastEdited] = useState(null)
   const flashRow = useRef(null)
+
+  // Rows the last Check Rules run found breaking their account-type rule,
+  // kept red for the same reason the amber stays: the dialog can be closed
+  // without fixing anything, and the findings should survive that. Replacing
+  // a head moves the row from red to amber; the Clear-highlights button and
+  // Refresh clear both.
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [conflictIds, setConflictIds] = useState(() => new Set())
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -226,7 +236,9 @@ export default function StagingPage() {
     }
   }, [lastEdited, rows])
 
-  const clearHighlights = () => { setEditedIds(new Set()); setLastEdited(null) }
+  const clearHighlights = () => {
+    setEditedIds(new Set()); setLastEdited(null); setConflictIds(new Set())
+  }
 
   // The value a dropdown should start on for this row.
   //
@@ -443,15 +455,17 @@ export default function StagingPage() {
           <div className="flex items-center gap-2">
             {/* Only while something is lit. The yellow does not time out, so
                 there has to be a way to put it back that is not "reload the
-                page and hope". */}
-            {editedIds.size > 0 && (
+                page and hope". Counts the red rule conflicts too — one button
+                clears every colour this page paints. */}
+            {(editedIds.size > 0 || conflictIds.size > 0) && (
               <button
                 onClick={clearHighlights}
-                title="Stop highlighting the rows edited so far"
+                title="Stop highlighting the edited and rule-conflict rows"
                 className="btn-sm inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 hover:bg-amber-100"
               >
                 <Highlighter className="h-3.5 w-3.5 mr-1" />
-                Clear {editedIds.size} highlight{editedIds.size === 1 ? '' : 's'}
+                Clear {editedIds.size + conflictIds.size} highlight
+                {editedIds.size + conflictIds.size === 1 ? '' : 's'}
               </button>
             )}
             <button
@@ -460,6 +474,18 @@ export default function StagingPage() {
             >
               <RefreshCw className="h-3.5 w-3.5 mr-1" />
               Refresh
+            </button>
+            {/* Read-only until the dialog's own Replace button, so it is not
+                gated on canWrite — checking is looking, and anyone who can see
+                the rows may look. */}
+            <button
+              onClick={() => setRulesOpen(true)}
+              disabled={!summary?.staged_total}
+              title="Check one account's rows against its account-type rule"
+              className="btn-secondary btn-sm"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+              Check Rules
             </button>
             {canWrite && (
               <button
@@ -625,11 +651,21 @@ export default function StagingPage() {
                     <tr
                       key={row.id}
                       ref={row.id === lastEdited ? flashRow : undefined}
-                      title={editedIds.has(row.id) ? 'Edited since this page was opened' : undefined}
+                      title={
+                        conflictIds.has(row.id)
+                          ? 'Breaks its account-type rule — open Check Rules to fix or unlock it'
+                          : editedIds.has(row.id)
+                            ? 'Edited since this page was opened'
+                            : undefined
+                      }
                       className={`transition-colors duration-700 ${
-                        editedIds.has(row.id)
-                          ? 'bg-amber-100 ring-1 ring-inset ring-amber-300'
-                          : 'hover:bg-slate-50/70'
+                        // Red beats amber: a row can be both edited and still
+                        // wrong, and wrong is the one worth seeing.
+                        conflictIds.has(row.id)
+                          ? 'bg-red-50 ring-1 ring-inset ring-red-300'
+                          : editedIds.has(row.id)
+                            ? 'bg-amber-100 ring-1 ring-inset ring-amber-300'
+                            : 'hover:bg-slate-50/70'
                       }`}
                     >
                       {columns.map((c) => (
@@ -832,6 +868,28 @@ export default function StagingPage() {
           </div>
         )}
       </Modal>
+
+      <CheckRulesDialog
+        isOpen={rulesOpen}
+        onClose={() => setRulesOpen(false)}
+        canWrite={canWrite}
+        onChecked={(ids) => setConflictIds(ids)}
+        onApplied={async (ids) => {
+          // Fixed rows go from red to amber — no longer wrong, but changed,
+          // and the amber is the record of what this session touched.
+          setConflictIds((prev) => {
+            const next = new Set(prev)
+            ids.forEach((id) => next.delete(id))
+            return next
+          })
+          setEditedIds((prev) => {
+            const next = new Set(prev)
+            ids.forEach((id) => next.add(id))
+            return next
+          })
+          await load()
+        }}
+      />
 
       <ConfirmDialog
         isOpen={clearOpen}

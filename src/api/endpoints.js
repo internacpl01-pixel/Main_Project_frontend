@@ -380,6 +380,23 @@ export async function finalizeRow(rowId) {
   return data
 }
 
+// Check one account's staged rows against its account-type rule (read-only).
+// `payload` is { account_type, account_number }. Returns the judged rows with
+// status ok / conflict / no_direction, plus the heads the rule expects per
+// direction — resolved from this company's own master tables.
+export async function checkTempRules(payload) {
+  const { data } = await api.post('/transactions/temp-trans/check-rules', payload)
+  return data
+}
+
+// Replace the heads the check found wrong. `payload` is { account_type,
+// account_number, rows: [{ id, head_id }] }. The server re-checks every
+// target against the rule before writing; locked rows are skipped and counted.
+export async function applyTempRules(payload) {
+  const { data } = await api.post('/transactions/temp-trans/check-rules/apply', payload)
+  return data
+}
+
 // ── Import / Upload ──────────────────────────────────────────────────────────
 
 // Parsing is measured in seconds per page, so a long statement runs for
