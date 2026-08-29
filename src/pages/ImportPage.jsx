@@ -5,6 +5,7 @@ import {
   pollImportJob,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner } from '../components/UI.jsx'
+import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
@@ -175,6 +176,12 @@ export default function ImportPage() {
                                    // byte; from here the wait belongs to the
                                    // parse, which reports itself.
                                    (pct) => setUploadPct(pct >= 100 ? null : pct))
+      // A beat before the overlay comes down. pollImportJob reports the job one
+      // last time with state 'done', so at this moment every step on screen has
+      // just gone green — closing instantly would take that away in the same
+      // frame it appeared, and the last thing seen of a four-minute parse would
+      // be it vanishing.
+      await new Promise((r) => setTimeout(r, 750))
       setResult(res)
       if (res.row_count > 0) {
         toast.success(
@@ -495,86 +502,11 @@ export default function ImportPage() {
               </div>
             )}
 
-            {/* Real progress, not an animation: the server counts pages as it
-                finishes them and this is that count. It only appears once the
-                first reading arrives, so a fast file never flashes a bar.
-
-                A batched import gets a bar PER BATCH, restarting at zero for
-                each one. One bar spread over the whole file barely moves for
-                minutes at a time, which reads as a hang; a bar per batch moves
-                at a visible rate and the finished batches stay listed below it,
-                so nothing about where the import has got to is lost. */}
-            {/* The upload's own bar, shown until the last byte lands. Same
-                shape as the parse bar below it and never both at once —
-                they are two halves of one wait, in order. */}
-            {importing && uploadPct !== null && (
-              <div className="mb-5">
-                <div className="flex items-baseline justify-between mb-1.5">
-                  <span className="text-sm font-medium text-slate-700">
-                    Uploading {file?.name}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                    {uploadPct}%
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary-600 transition-all duration-300 ease-out"
-                    style={{ width: `${uploadPct}%` }}
-                  />
-                </div>
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Sending the file to the server. Reading it starts once it has
-                  all arrived.
-                </p>
-              </div>
-            )}
-
-            {importing && uploadPct === null && progress && (
-              <div className="mb-5">
-                <div className="flex items-baseline justify-between mb-1.5">
-                  <span className="text-sm font-medium text-slate-700">
-                    {progress.state === 'saving'
-                      ? 'Saving rows'
-                      : progress.batch_total > 1 && progress.batch_index >= 1
-                        ? `${stepWord} ${progress.batch_index} of ${progress.batch_total}`
-                          + (progress.batch_label ? ` — ${progress.batch_label}` : '')
-                        : 'Reading statement'}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                    {progress.percent}%
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary-600 transition-all duration-500 ease-out"
-                    style={{ width: `${progress.percent}%` }}
-                  />
-                </div>
-                <p className="mt-1.5 text-xs text-slate-500">
-                  {progress.message}
-                  {progress.total_pages ? ` · ${progress.total_pages} pages` : ''}
-                  {progress.elapsed_ms >= 1000
-                    ? ` · ${Math.round(progress.elapsed_ms / 1000)}s elapsed`
-                    : ''}
-                  {progress.batch_total > 1
-                    ? ` · ${progress.overall_percent}% of the file`
-                    : ''}
-                </p>
-                {progress.batch_total > 1 && progress.batches_done?.length > 0 && (
-                  <ul className="mt-2 space-y-0.5">
-                    {progress.batches_done.map((b) => (
-                      <li key={b.index}
-                          className="flex items-center text-xs text-emerald-700">
-                        <CheckCircle className="mr-1.5 h-3 w-3 shrink-0" />
-                        {stepWord} {b.index} of {b.total} completed · {b.label} ·{' '}
-                        {b.rows} rows
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            {/* The progress panels that used to sit here are now the
+                full-screen step list — see ImportProgressOverlay, mounted at
+                the bottom of this page. Same readings from the same job; a
+                statement takes minutes and that wait had outgrown a strip
+                inside a form. */}
 
             <div className="flex justify-center">
               <button
@@ -795,6 +727,16 @@ export default function ImportPage() {
           </div>
         </div>
       )}
+
+      {/* Covers the window for the whole import. Every line in it is a phase
+          the server has actually reported — see the component. */}
+      <ImportProgressOverlay
+        open={importing}
+        fileName={file?.name || ''}
+        uploadPct={uploadPct}
+        progress={progress}
+        stepWord={stepWord}
+      />
     </div>
   )
 }
