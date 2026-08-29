@@ -23,13 +23,17 @@ import { Check } from 'lucide-react'
 
 // One step's slot, in px. Fixed rather than measured: the list is translated by
 // a multiple of it, and a measured height would have to be re-read on every
-// label change — which is every step.
-const ROW_HEIGHT = 76
+// label change — which is every step. Tall enough for a label plus the bar
+// under the step in progress, and no taller.
+const ROW_HEIGHT = 58
 // Which slot the step in progress occupies. 1 rather than 0 leaves a finished
 // line visible above it, which is what makes the list read as a list being
 // worked through rather than a label being replaced.
 const ACTIVE_SLOT = 1
-const VISIBLE_ROWS = 4
+// Three: the one just finished, the one running, the one next. A fourth only
+// ever showed a dimmed line nobody reads and made the card taller than the
+// thing it is describing.
+const VISIBLE_ROWS = 3
 
 /**
  * The step list for a job, from what the server has actually reported.
@@ -123,29 +127,29 @@ function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe }) {
 function StepMark({ status }) {
   if (status === 'done') {
     return (
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full
-                       bg-white shadow-[0_0_18px_rgba(255,255,255,0.35)]">
-        <Check className="h-5 w-5 text-emerald-500" strokeWidth={3} />
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full
+                       bg-white shadow-[0_0_14px_rgba(255,255,255,0.3)]">
+        <Check className="h-4 w-4 text-emerald-500" strokeWidth={3} />
       </span>
     )
   }
   if (status === 'active') {
     return (
-      <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+      <span className="relative flex h-7 w-7 shrink-0 items-center justify-center">
         <span className="absolute inset-0 rounded-full border-2 border-white/20" />
         {/* The turning arc — one white quarter over a faint ring. This is the
             moving circle: while it turns, the import is alive. */}
         <span className="absolute inset-0 rounded-full border-2 border-transparent
                          border-t-white animate-spin
                          motion-reduce:[animation-duration:2s]" />
-        <span className="h-2 w-2 rounded-full bg-white/70" />
+        <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
       </span>
     )
   }
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full
                      border-2 border-white/15">
-      <Check className="h-4 w-4 text-white/20" strokeWidth={3} />
+      <Check className="h-3.5 w-3.5 text-white/20" strokeWidth={3} />
     </span>
   )
 }
@@ -193,9 +197,8 @@ export default function ImportProgressOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex flex-col items-center justify-center
-                 bg-gradient-to-br from-slate-900 via-slate-900 to-primary-900
-                 px-6"
+      className="fixed inset-0 z-[70] flex items-center justify-center
+                 bg-slate-900/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Importing your statement"
@@ -206,28 +209,41 @@ export default function ImportProgressOverlay({
       <p className="sr-only" role="status" aria-live="polite">
         {steps[activeIndex]?.label || 'Importing'}
       </p>
-      {/* A soft light behind the list, so the panel reads as lit rather than as
-          a flat rectangle. Purely decorative and never in the way. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-70"
-        style={{
-          background:
-            'radial-gradient(60rem 32rem at 50% 42%, rgba(59,130,246,0.16), transparent 70%)',
-        }}
-      />
 
-      <div className="relative w-full max-w-2xl">
+      {/* A card, not the whole window. Filling the screen with three lines of
+          text left an acre of empty navy around them and made a working import
+          look like the app had fallen over into some other mode. The page stays
+          visible and dimmed behind, which is what every other dialog here does
+          — this one just cannot be dismissed. */}
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl
+                      border border-white/10 shadow-2xl
+                      bg-gradient-to-br from-slate-900 via-slate-900 to-primary-900">
+        {/* A soft light inside the card, so it reads as lit rather than as a
+            flat rectangle. Purely decorative and never in the way. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(28rem 14rem at 50% 30%, rgba(59,130,246,0.18), transparent 70%)',
+          }}
+        />
+
+        <div className="relative px-6 pt-5 pb-4">
+          {/* Which file, said once at the top. It is true for the whole import,
+              so it does not belong in a list of things that finish. */}
+          <p className="truncate text-xs font-medium text-white/50" title={fileName}>
+            {fileName}
+          </p>
+        </div>
+
         {/* The window the list scrolls through. The mask is what makes the step
             above and the step below fade rather than being cut off at an edge,
             which is what stops it looking like a clipped box. */}
         <div
-          className="relative overflow-hidden"
+          className="relative overflow-hidden px-6"
           style={{
-            // Four steps of room, but never more than half the window: on a
-            // laptop in a short window the fixed height pushed the file name
-            // and the note under it off the bottom of the screen.
-            height: `min(${ROW_HEIGHT * VISIBLE_ROWS}px, 52vh)`,
+            height: ROW_HEIGHT * VISIBLE_ROWS,
             maskImage:
               'linear-gradient(to bottom, transparent 0%, #000 24%, #000 74%, transparent 100%)',
             WebkitMaskImage:
@@ -238,7 +254,7 @@ export default function ImportProgressOverlay({
               parse look alive rather than stuck. Shortened under reduced
               motion rather than dropped: without any transition the list
               teleports a row at a time, which is the one reading worse than
-              both. It is 76px, once per finished step, and it is the thing
+              both. It is one row, once per finished step, and it is the thing
               the user is watching. */}
           <div
             className="transition-transform duration-500 ease-out motion-reduce:duration-200"
@@ -248,17 +264,17 @@ export default function ImportProgressOverlay({
               <div
                 key={step.key}
                 style={{ height: ROW_HEIGHT }}
-                className={`flex items-center gap-6 transition-opacity duration-500 ${
+                className={`flex items-center gap-4 transition-opacity duration-500 ${
                   step.status === 'pending' ? 'opacity-45' : 'opacity-100'
                 }`}
               >
                 <StepMark status={step.status} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-3">
+                  <div className="flex items-baseline gap-2">
                     <span
-                      className={`truncate text-xl ${
+                      className={`truncate text-sm ${
                         step.status === 'active'
-                          ? 'font-medium text-white'
+                          ? 'font-semibold text-white'
                           : step.status === 'done'
                             ? 'text-white/85'
                             : 'text-white/60'
@@ -268,12 +284,12 @@ export default function ImportProgressOverlay({
                       {step.status !== 'done' && '...'}
                     </span>
                     {step.detail && (
-                      <span className="shrink-0 text-sm text-white/45 tabular-nums">
+                      <span className="shrink-0 text-xs text-white/45 tabular-nums">
                         {step.detail}
                       </span>
                     )}
                     {step.percent !== null && step.percent !== undefined && (
-                      <span className="shrink-0 text-sm font-semibold text-white/70 tabular-nums">
+                      <span className="shrink-0 text-xs font-semibold text-white/70 tabular-nums">
                         {step.percent}%
                       </span>
                     )}
@@ -283,7 +299,7 @@ export default function ImportProgressOverlay({
                       batch, or the browser's count of bytes sent. */}
                   {step.status === 'active' && step.percent !== null
                     && step.percent !== undefined && (
-                    <div className="mt-2 h-1 w-full max-w-sm overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
                       <div
                         className="h-full rounded-full bg-white/80 transition-all duration-500 ease-out"
                         style={{ width: `${step.percent}%` }}
@@ -296,20 +312,20 @@ export default function ImportProgressOverlay({
           </div>
         </div>
 
-        {/* The file this is all about, and how far through it is. Kept out of
-            the scrolling list because it is true for the whole import. */}
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-2 gap-y-1
-                        text-center text-sm text-white/45">
-          <span className="font-medium text-white/70">{fileName}</span>
-          {progress?.total_pages ? <span>· {progress.total_pages} pages</span> : null}
-          {overall !== null && overall !== undefined
-            ? <span>· {overall}% of the file</span> : null}
-          {elapsed ? <span>· {elapsed} elapsed</span> : null}
+        {/* How far through the file, and the warning that matters. Under a rule
+            rather than floating below the card, so the panel reads as one
+            object instead of a list with captions drifting under it. */}
+        <div className="relative border-t border-white/10 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-x-2 text-xs text-white/45">
+            {progress?.total_pages ? <span>{progress.total_pages} pages</span> : null}
+            {overall !== null && overall !== undefined
+              ? <span>· {overall}% of the file</span> : null}
+            {elapsed ? <span>· {elapsed} elapsed</span> : null}
+          </div>
+          <p className="mt-1 text-xs text-white/30">
+            Keep this tab open — closing it loses track of the import.
+          </p>
         </div>
-        <p className="mt-2 text-center text-xs text-white/30">
-          Leave this open — the import carries on server-side, and closing the
-          tab is the one thing that loses track of it.
-        </p>
       </div>
     </div>
   )
