@@ -23,17 +23,26 @@ import {
 // true when it read one sheet; a workbook of eight accounts and a few thousand
 // rows is a different job, and it reports per sheet exactly as a PDF reports
 // per batch.
+// `onUploadPercent` covers the first half of the wait, which had nothing at
+// all: the file has to reach the server before any of the above can start, and
+// on a 25 MB statement over a home connection that is the longer half. The
+// button read "Parsing PDF..." throughout it — describing work the server had
+// not yet been given the bytes to begin.
 async function importFile(file, bankId = null, password = '', pages = '',
-                          batchPages = null, onProgress, sheets = '') {
+                          batchPages = null, onProgress, sheets = '',
+                          onUploadPercent) {
   const ext = file.name.split('.').pop().toLowerCase()
   let started
   if (ext === 'pdf') {
     started = await importPdf(file, true, bankId, password,
-                              { pages, batchPages, background: true })
+                              { pages, batchPages, background: true,
+                                onUploadPercent })
   } else if (ext === 'csv') {
-    started = await importCsv(file, true, bankId, { background: true })
+    started = await importCsv(file, true, bankId,
+                              { background: true, onUploadPercent })
   } else {
-    started = await importExcel(file, true, bankId, { sheets, background: true })
+    started = await importExcel(file, true, bankId,
+                                { sheets, background: true, onUploadPercent })
   }
   return pollImportJob(started.job_id, onProgress)
 }
@@ -77,6 +86,11 @@ export default function ImportPage() {
   const [batchPages, setBatchPages] = useState('')
   // The last reading from the running job, or null when nothing is running.
   const [progress, setProgress] = useState(null)
+  // How much of the file has reached the server, 0-100, or null once it has
+  // all landed and the server has taken over. Its own state and not folded
+  // into `progress`, because they measure different things: this one is the
+  // browser's upload, that one is the server's parse.
+  const [uploadPct, setUploadPct] = useState(null)
   // What the workbook holds, once it has been inspected, and which of its
   // sheets are ticked. A workbook is one file but several statements, so this
   // is the spreadsheet's version of the PDF page selector.
@@ -109,8 +123,11 @@ export default function ImportPage() {
       // says — and a workbook whose columns were not recognised is worth
       // knowing about before the rows are staged, not after.
       setInspecting(true)
+      setUploadPct(0)
       try {
-        const info = await inspectExcel(f)
+        const info = await inspectExcel(f, {
+          onUploadPercent: (pct) => setUploadPct(pct >= 100 ? null : pct),
+        })
         setWorkbook(info)
         setChosenSheets(info.statement_sheets || [])
         if (!info.statement_sheets?.length) {
@@ -122,6 +139,7 @@ export default function ImportPage() {
         toast.error(`Could not read the sheets: ${err.message}`)
       } finally {
         setInspecting(false)
+        setUploadPct(null)
       }
     }
   }, [])
@@ -148,10 +166,15 @@ export default function ImportPage() {
     setImporting(true)
     setPwError('')
     setProgress(null)
+    setUploadPct(0)
     try {
       const res = await importFile(file, bankId || null, password, pages.trim(),
                                    batchPages.trim() === '' ? null : Number(batchPages),
-                                   setProgress, chosenSheets.join(','))
+                                   setProgress, chosenSheets.join(','),
+                                   // At 100 the browser has handed over every
+                                   // byte; from here the wait belongs to the
+                                   // parse, which reports itself.
+                                   (pct) => setUploadPct(pct >= 100 ? null : pct))
       setResult(res)
       if (res.row_count > 0) {
         toast.success(
@@ -173,6 +196,7 @@ export default function ImportPage() {
     } finally {
       setImporting(false)
       setProgress(null)
+      setUploadPct(null)
     }
   }
 
@@ -182,6 +206,7 @@ export default function ImportPage() {
     // hidden whenever its value goes empty, so there is no separate flag here.
     setPassword(''); setPwError(''); setPages(''); setProgress(null)
     setBatchPages(''); setWorkbook(null); setChosenSheets([]); setInspecting(false)
+    setUploadPct(null)
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
@@ -373,7 +398,9 @@ export default function ImportPage() {
             {isExcel && inspecting && (
               <div className="mb-5 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
                 <Spinner size="sm" />
-                Reading the workbook's sheets...
+                {uploadPct !== null
+                  ? `Uploading the workbook... ${uploadPct}%`
+                  : "Reading the workbook's sheets..."}
               </div>
             )}
 
@@ -477,7 +504,33 @@ export default function ImportPage() {
                 minutes at a time, which reads as a hang; a bar per batch moves
                 at a visible rate and the finished batches stay listed below it,
                 so nothing about where the import has got to is lost. */}
-            {importing && progress && (
+            {/* The upload's own bar, shown until the last byte lands. Same
+                shape as the parse bar below it and never both at once —
+                they are two halves of one wait, in order. */}
+            {importing && uploadPct !== null && (
+              <div className="mb-5">
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-sm font-medium text-slate-700">
+                    Uploading {file?.name}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                    {uploadPct}%
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary-600 transition-all duration-300 ease-out"
+                    style={{ width: `${uploadPct}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Sending the file to the server. Reading it starts once it has
+                  all arrived.
+                </p>
+              </div>
+            )}
+
+            {importing && uploadPct === null && progress && (
               <div className="mb-5">
                 <div className="flex items-baseline justify-between mb-1.5">
                   <span className="text-sm font-medium text-slate-700">
@@ -532,12 +585,14 @@ export default function ImportPage() {
               >
                 {importing ? (
                   <>
-                    <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
-                    {progress
-                      ? (progress.batch_total > 1 && progress.batch_index >= 1
-                          ? `${stepWord} ${progress.batch_index}/${progress.batch_total} · ${progress.percent}%`
-                          : `Working… ${progress.percent}%`)
-                      : (isPdf ? 'Parsing PDF...' : 'Reading file...')}
+                    <Spinner size="sm" tone="white" className="mr-2" />
+                    {uploadPct !== null
+                      ? `Uploading… ${uploadPct}%`
+                      : progress
+                        ? (progress.batch_total > 1 && progress.batch_index >= 1
+                            ? `${stepWord} ${progress.batch_index}/${progress.batch_total} · ${progress.percent}%`
+                            : `Working… ${progress.percent}%`)
+                        : (isPdf ? 'Parsing PDF...' : 'Reading file...')}
                   </>
                 ) : (
                   <><Upload className="h-4 w-4 mr-1.5" />Upload and Import</>

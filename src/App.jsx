@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth, MANAGER, SUPER_ADMIN } from './context/AuthContext.jsx'
 import Layout from './components/Layout.jsx'
+import { Spinner } from './components/UI.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ProjectsPage from './pages/ProjectsPage.jsx'
@@ -20,8 +21,8 @@ function ProtectedRoute({ children }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary-600 border-r-transparent" />
+        <div className="flex flex-col items-center">
+          <Spinner size="lg" />
           <p className="mt-3 text-sm text-slate-500">Loading...</p>
         </div>
       </div>
@@ -61,8 +62,8 @@ export default function App() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary-600 border-r-transparent" />
+        <div className="flex flex-col items-center">
+          <Spinner size="lg" />
           <p className="mt-3 text-sm text-slate-500">Loading...</p>
         </div>
       </div>

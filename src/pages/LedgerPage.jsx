@@ -3,7 +3,7 @@ import {
   fetchTransactions, fetchTransactionFilters, deleteAllTransactions,
 } from '../api/endpoints.js'
 import {
-  Spinner, EmptyState, ConfirmDialog, SearchInput, Pagination,
+  EmptyState, ConfirmDialog, SearchInput, Pagination, TableBusy, SkeletonRows,
 } from '../components/UI.jsx'
 import {
   FilterBar, SortHeader, nextSort, EMPTY_FILTERS, filterParams, activeCount,
@@ -39,6 +39,10 @@ export default function LedgerPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [clearOpen, setClearOpen] = useState(false)
+  // Emptying the ledger is a whole-table DELETE and takes as long as the ledger
+  // is big. It used to close its dialog and then run in silence, so the only
+  // thing on screen was the rows it was in the middle of removing.
+  const [clearing, setClearing] = useState(false)
 
   // Sorted and filtered in SQL, not here: the ledger is server-paged, so the
   // browser only ever holds one page and reordering it would leave every other
@@ -91,7 +95,7 @@ export default function LedgerPage() {
   const handleFilters = (next) => { setFilters(next); setPage(1) }
 
   const runClearAll = async () => {
-    setClearOpen(false)
+    setClearing(true)
     try {
       const r = await deleteAllTransactions()
       toast.success(
@@ -100,12 +104,18 @@ export default function LedgerPage() {
           ? `, ${r.rows_postable_again} back in Imported Rows to post again`
           : '')
       )
+      // Closed on success rather than on click: the dialog is what shows the
+      // delete running, and it is also what stops a second one being sent.
+      setClearOpen(false)
       setPage(1)
       load()
       // Nothing is left to filter by once the ledger is empty.
       loadFilterOptions()
     } catch (err) {
+      // Left open with the reason, so a refusal can be read and answered.
       toast.error(err.message)
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -138,7 +148,7 @@ export default function LedgerPage() {
               disabled={loading}
               className="btn-secondary"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
             </button>
             {/* Hidden when the ledger is already empty — a destructive button
                 that would do nothing is only there to be pressed by mistake. */}
@@ -175,7 +185,12 @@ export default function LedgerPage() {
       />
 
       <div className="card">
-        <div className="overflow-x-auto">
+        {/* Wrapper, not the scroller and not the card: the scroller is as wide
+            as the widest row and would put the spinner off-screen, and the
+            card contains the pager, which has to stay usable. */}
+        <div className="relative">
+          {loading && rows.length > 0 && <TableBusy />}
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/50">
@@ -213,12 +228,12 @@ export default function LedgerPage() {
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length + RESOLVED.length}
-                      className="px-6 py-16">
-                    <div className="flex justify-center"><Spinner size="lg" /></div>
-                  </td>
-                </tr>
+                // Rows keep their height, so the page does not jump when the
+                // real ones arrive. The column set comes back with them, so on
+                // the first render there is nothing to count yet.
+                <SkeletonRows
+                  cols={columns.length ? columns.length + RESOLVED.length : 6}
+                />
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + RESOLVED.length} className="px-6 py-16">
@@ -269,6 +284,7 @@ export default function LedgerPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         <Pagination
@@ -292,7 +308,8 @@ export default function LedgerPage() {
           'posting is what this undoes. Export first if you need a record of ' +
           'the ledger as it stands.'
         }
-        confirmText="Delete all"
+        confirmText={clearing ? 'Deleting...' : 'Delete all'}
+        busy={clearing}
       />
     </div>
   )

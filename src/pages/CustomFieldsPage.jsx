@@ -3,7 +3,10 @@ import {
   fetchCustomFields, createCustomField, deleteCustomFieldById, deleteCustomField,
   updateFieldMapEntry,
 } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog, MethodInput, MethodBadge } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, MethodInput, MethodBadge,
+  TableBusy, SkeletonRows,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -136,8 +139,14 @@ export default function CustomFieldsPage() {
           {lockedCount > 0 && ` · ${lockedCount} held by the database`}
         </div>
 
-        {loading ? (
-          <div className="px-6 py-16"><Spinner size="lg" /></div>
+        {loading && fields.length === 0 ? (
+          // Skeletons keep the card's height, so it does not collapse and snap
+          // back each time the field list is re-read.
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-slate-100">
+              <SkeletonRows cols={6} rows={5} />
+            </tbody>
+          </table>
         ) : fields.length === 0 ? (
           <EmptyState
             icon={<Columns3 className="h-10 w-10" />}
@@ -150,6 +159,10 @@ export default function CustomFieldsPage() {
             )}
           />
         ) : (
+          <div className="relative">
+          {/* Overlay on the wrapper, not the scroller — a scroller is as wide
+              as its widest row, so a centred spinner can land off-screen. */}
+          {loading && <TableBusy />}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -231,6 +244,7 @@ export default function CustomFieldsPage() {
               </tbody>
             </table>
           </div>
+          </div>
         )}
       </div>
 
@@ -305,6 +319,7 @@ export default function CustomFieldsPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleCreate} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Adding...' : 'Add Field'}
             </button>
           </div>
@@ -388,6 +403,7 @@ export default function CustomFieldsPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setEditing(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleEdit} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
@@ -406,7 +422,8 @@ export default function CustomFieldsPage() {
             : 'The mapping will be removed. No column exists behind it, so no stored data is lost. ') +
           'Statements will stop recording this field until you add it back. This cannot be undone.'
         }
-        confirmText="Delete Field"
+        confirmText={saving ? 'Deleting...' : 'Delete Field'}
+        busy={saving}
         danger
       />
     </div>

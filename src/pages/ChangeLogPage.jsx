@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { fetchFieldChangeLog, fetchFieldMap } from '../api/endpoints.js'
-import { Spinner, EmptyState, Pagination, SearchInput } from '../components/UI.jsx'
+import {
+  EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { History, ArrowRight } from 'lucide-react'
@@ -142,6 +144,10 @@ export default function ChangeLogPage() {
       </div>
 
       <div className="card">
+        {/* Overlay on the wrapper, not on the scroller (as wide as its widest
+            row) and not on the card (which holds the pager). */}
+        <div className="relative">
+        {loading && rows.length > 0 && <TableBusy />}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -155,8 +161,8 @@ export default function ChangeLogPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={6} className="px-6 py-12"><Spinner /></td></tr>
+              {loading && rows.length === 0 ? (
+                <SkeletonRows cols={6} />
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={6}>
@@ -204,6 +210,7 @@ export default function ChangeLogPage() {
               )}
             </tbody>
           </table>
+        </div>
         </div>
 
         <Pagination

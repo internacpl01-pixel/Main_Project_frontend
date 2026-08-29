@@ -10,6 +10,7 @@
  * them would be read as the data changing when it was posted.
  */
 import { useEffect, useRef, useState } from 'react'
+import { Spinner } from './UI.jsx'
 import {
   Calendar, Hash, Building2, ChevronDown, ChevronUp, X, Check, Search,
 } from 'lucide-react'
@@ -323,6 +324,10 @@ export function FilterBar({ options, value, onChange, loading = false, className
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+      {/* Three greyed-out buttons look identical to three buttons this company
+          cannot use. The spinner is the difference between "not yet" and
+          "never". */}
+      {loading && <Spinner size="sm" />}
       <Popover
         icon={<Calendar className="h-3.5 w-3.5" />}
         label={date?.label || 'Date'}

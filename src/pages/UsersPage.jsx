@@ -4,7 +4,8 @@ import {
   fetchUserProjects, setUserProjects,
 } from '../api/endpoints.js'
 import {
-  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput,
+  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput, TableBusy,
+  SkeletonRows,
 } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth, LEVELS, ROLE_LABELS, COMPANY_ADMIN } from '../context/AuthContext.jsx'
@@ -248,6 +249,10 @@ export default function UsersPage() {
 
       {!error && (
         <div className="card">
+          {/* Overlay on the wrapper: the scroller is as wide as its widest
+              row, so a spinner centred in it can land off-screen. */}
+          <div className="relative">
+          {loading && items.length > 0 && <TableBusy />}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -259,8 +264,8 @@ export default function UsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr><td colSpan="4" className="px-6 py-12"><Spinner /></td></tr>
+                {loading && items.length === 0 ? (
+                  <SkeletonRows cols={4} rows={5} />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan="4">
@@ -344,6 +349,7 @@ export default function UsersPage() {
               </tbody>
             </table>
           </div>
+          </div>
         </div>
       )}
 
@@ -426,6 +432,7 @@ export default function UsersPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleCreate} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Creating...' : 'Create'}
             </button>
           </div>
@@ -455,6 +462,7 @@ export default function UsersPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setEditing(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleEdit} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
@@ -477,6 +485,7 @@ export default function UsersPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setRoleTarget(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleRoleChange} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Update Role'}
             </button>
           </div>
@@ -534,6 +543,7 @@ export default function UsersPage() {
                 disabled={saving || projectsLoading}
                 className="btn-primary text-sm"
               >
+                {saving && <Spinner size="sm" tone="white" className="mr-2" />}
                 {saving ? 'Saving...' : 'Save Assignment'}
               </button>
             </div>
@@ -547,7 +557,8 @@ export default function UsersPage() {
         onConfirm={handleDelete}
         title="Delete User"
         message={`Delete "${deleteConfirm?.username}"? This cannot be undone.`}
-        confirmText="Delete"
+        confirmText={saving ? 'Deleting...' : 'Delete'}
+        busy={saving}
         danger
       />
     </div>

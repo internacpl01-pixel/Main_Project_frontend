@@ -87,7 +87,7 @@ export default function ExportPage() {
                 className="btn-primary"
               >
                 {exporting ? (
-                  <><Spinner size="sm" className="mr-2" /> Exporting...</>
+                  <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
                 ) : (
                   <><Download className="h-4 w-4 mr-2" /> Export Data</>
                 )}

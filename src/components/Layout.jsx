@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
+import { BusyDot } from './GlobalProgress.jsx'
 import SuperAdminHome from '../pages/SuperAdminHome.jsx'
 import { GreetingTicker } from './GreetingTicker.jsx'
 
@@ -191,6 +192,11 @@ export default function Layout() {
                   </span>
                 </div>
               )}
+              {/* The moving circle. Beside the company name rather than over
+                  the page, so it never covers anything and is in the same
+                  place whatever screen you are on — glance here to know
+                  whether the app is waiting on the server or on you. */}
+              <BusyDot className="ml-1" />
             </div>
 
             <div className="relative">

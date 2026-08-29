@@ -28,9 +28,29 @@ export default {
           '0%, 100%': { transform: 'translateY(0px)' },
           '50%': { transform: 'translateY(-10px)' },
         },
+        // The global "a request is in flight" stripe. Indeterminate on purpose:
+        // the server does not report how far through a query it is, so a bar
+        // that filled 0->100% would be inventing a number. A stripe that keeps
+        // travelling says "working" without claiming to know how much is left.
+        progress: {
+          '0%': { transform: 'translateX(-100%) scaleX(0.35)' },
+          '50%': { transform: 'translateX(20%) scaleX(0.6)' },
+          '100%': { transform: 'translateX(100%) scaleX(0.35)' },
+        },
+        // What the stripe does instead when the system asks for less motion.
+        // Not nothing: a progress indicator that has stopped moving is a
+        // progress indicator that says nothing, and this one only exists while
+        // the app is genuinely working. Travel and scale are what cause
+        // discomfort, so both are dropped and only the opacity breathes.
+        'progress-still': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.35' },
+        },
       },
       animation: {
         float: 'float 7s ease-in-out infinite',
+        progress: 'progress 1.15s ease-in-out infinite',
+        'progress-still': 'progress-still 1.6s ease-in-out infinite',
       },
     },
   },

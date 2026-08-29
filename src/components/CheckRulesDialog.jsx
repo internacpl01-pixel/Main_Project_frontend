@@ -23,6 +23,10 @@ const fmtAmount = (n) =>
         minimumFractionDigits: 2, maximumFractionDigits: 2,
       })
 
+// staging.normalise_account, in the browser: digits only, then leading zeros.
+// The same reduction the server matches accounts by.
+const accountDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^0+/, '')
+
 export default function CheckRulesDialog({
   isOpen, onClose, canWrite, onChecked, onApplied,
 }) {
@@ -62,8 +66,28 @@ export default function CheckRulesDialog({
 
   // Only accounts the Bank master types as the chosen kind, and only ones
   // with staged rows — the filter feed is already exactly that intersection.
-  const accountsForType = accounts.filter(
-    (a) => a.in_bank_master && (a.account_type || '').toUpperCase() === type
+  //
+  // Folded to one entry per real account. The feed groups by the value as
+  // written, and the same account legitimately appears twice when one sheet
+  // stored it as text and another as a number that dropped the leading zero.
+  // Both carry the same Bank row and the same label, so they would render as
+  // two identical options with the rows split between them — and the check,
+  // which matches on digits, would then report more rows than the option said
+  // it held. Counts are summed here so the number beside an account is the
+  // number the check will judge.
+  const accountsForType = Object.values(
+    accounts
+      .filter((a) => a.in_bank_master &&
+                     (a.account_type || '').toUpperCase() === type)
+      .reduce((acc, a) => {
+        const key = accountDigits(a.value)
+        if (!acc[key]) acc[key] = { ...a, spellings: 1 }
+        else {
+          acc[key].count += a.count
+          acc[key].spellings += 1
+        }
+        return acc
+      }, {})
   )
 
   const conflicts = (result?.rows || []).filter((r) => r.status === 'conflict')
@@ -84,9 +108,13 @@ export default function CheckRulesDialog({
       setChoices(defaults)
       // Paint the conflicting rows red on the table behind this dialog, so
       // closing it without fixing anything still leaves the findings visible.
-      onChecked?.(new Set(
-        data.rows.filter((r) => r.status === 'conflict').map((r) => r.id)
-      ))
+      // The field the rule judged goes with them: fixing a red row through
+      // the ordinary editor has to be able to clear its red, and which
+      // dropdown that is depends on the rule, not on this component.
+      onChecked?.(
+        new Set(data.rows.filter((r) => r.status === 'conflict').map((r) => r.id)),
+        data.target.field,
+      )
     } catch (err) {
       setError(err.message)
     } finally {
@@ -127,7 +155,12 @@ export default function CheckRulesDialog({
             check below it, so both resets clear the result. */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="label">Account type</label>
+            <label className="label flex items-center gap-2">
+              Account type
+              {/* Both dropdowns fill from the same two requests, so one
+                  spinner covers the pair. */}
+              {loadingLists && <Spinner size="sm" />}
+            </label>
             <select
               className="input"
               value={type}
@@ -173,6 +206,9 @@ export default function CheckRulesDialog({
               {accountsForType.map((a) => (
                 <option key={a.value} value={a.value}>
                   {a.label} · {a.count} {a.count === 1 ? 'row' : 'rows'}
+                  {a.spellings > 1
+                    ? ` (written ${a.spellings} ways in the statements)`
+                    : ''}
                 </option>
               ))}
             </select>
@@ -195,7 +231,9 @@ export default function CheckRulesDialog({
             disabled={!type || !account || checking}
             className="btn-primary text-sm inline-flex items-center"
           >
-            <ShieldCheck className="h-4 w-4 mr-1.5" />
+            {checking
+              ? <Spinner size="sm" tone="white" className="mr-1.5" />
+              : <ShieldCheck className="h-4 w-4 mr-1.5" />}
             {checking ? 'Checking...' : 'Check'}
           </button>
         </div>
@@ -324,6 +362,7 @@ export default function CheckRulesDialog({
                     : undefined}
                   className="btn-primary text-sm"
                 >
+                  {applying && <Spinner size="sm" tone="white" className="mr-2" />}
                   {applying
                     ? 'Replacing...'
                     : `Replace heads according to rule (${actionable.length})`}

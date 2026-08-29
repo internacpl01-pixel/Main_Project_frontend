@@ -1,19 +1,118 @@
 import { useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
-export function Spinner({ size = 'md', className = '' }) {
+// `tone` and not a colour in `className`: Tailwind emits its utilities in its
+// own order, so a text-white passed by a caller does not reliably beat the
+// text-primary-600 written here — which is why the spinners on the Sign In and
+// Export buttons were a blue circle on a blue button, i.e. no spinner at all.
+// The colour is chosen here, from a fixed set, so it always wins.
+const SPINNER_TONES = {
+  primary: 'text-primary-600',
+  white: 'text-white',
+  slate: 'text-slate-400',
+  // Follows whatever the surrounding text colour is.
+  current: 'text-current',
+}
+
+export function Spinner({ size = 'md', tone = 'primary', className = '' }) {
   const sizeClasses = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
   return (
     <svg
-      className={`animate-spin text-primary-600 ${sizeClasses[size]} ${className}`}
+      // Always spinning, slower when the system asks for less motion. A
+      // stopped spinner is indistinguishable from a frozen screen, which is
+      // the one thing this is here to rule out — so it is dampened rather than
+      // switched off. It is small, it turns in place, and it is only on screen
+      // while something is genuinely running.
+      className={`animate-spin motion-reduce:[animation-duration:2s] ${SPINNER_TONES[tone] || SPINNER_TONES.primary} ${sizeClasses[size]} ${className}`}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
+      role="status"
+      aria-label="Loading"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   )
+}
+
+/**
+ * Does this person want less movement on screen?
+ *
+ * Lives here rather than in the one page that first needed it, because the
+ * global progress indicator asks the same question and two copies of a media
+ * query is two things to keep in step.
+ */
+export function useReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  )
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!mq) return
+    const onChange = (e) => setReduced(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return reduced
+}
+
+/**
+ * The "these rows are being replaced" veil.
+ *
+ * Every table on this app is server-paged, so changing the page, the sort, a
+ * filter or the search is a round trip. Blanking the table for it makes the
+ * layout collapse and snap back; leaving it untouched makes a slow query look
+ * like a click that did nothing. This does neither: the rows you were reading
+ * stay exactly where they are, faded, with a spinner over them.
+ *
+ * Wrap the table's scroll container in a `relative` div and put this beside it
+ * — not inside the scroller, whose box is as wide as the widest row, which
+ * would centre the spinner somewhere off to the right.
+ *
+ * Pointer events are deliberately NOT disabled: for the moment a row is being
+ * replaced, it should not be possible to open the editor on the version that
+ * is about to disappear.
+ */
+export function TableBusy({ label = 'Loading rows...' }) {
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-start justify-center
+                 bg-white/65 backdrop-blur-[1px] pt-16"
+      aria-hidden="true"
+    >
+      <div className="flex items-center gap-2 rounded-full border border-slate-200
+                      bg-white px-3 py-1.5 shadow-sm">
+        <Spinner size="sm" />
+        <span className="text-xs font-medium text-slate-500">{label}</span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Grey bars in the shape of the table, for the first load — when there are no
+ * rows yet to keep and fade.
+ *
+ * Skeletons rather than one spinner in an empty table: the rows keep their
+ * height, so the page does not jump when the data arrives. Same treatment the
+ * super admin console already gives its stat tiles.
+ *
+ * The widths repeat on a short cycle so the block reads as a table rather than
+ * as a grid of identical blocks.
+ */
+const SKELETON_WIDTHS = ['w-24', 'w-16', 'w-32', 'w-20', 'w-28', 'w-12']
+
+export function SkeletonRows({ cols = 4, rows = 8 }) {
+  return Array.from({ length: rows }, (_, r) => (
+    <tr key={r} className="animate-pulse">
+      {Array.from({ length: Math.max(1, cols) }, (_, c) => (
+        <td key={c} className="px-6 py-3.5">
+          <div className={`h-3 rounded bg-slate-100 ${SKELETON_WIDTHS[(r + c) % SKELETON_WIDTHS.length]}`} />
+        </td>
+      ))}
+    </tr>
+  ))
 }
 
 export function EmptyState({ icon, title, description, action }) {
@@ -27,22 +126,40 @@ export function EmptyState({ icon, title, description, action }) {
   )
 }
 
-export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', danger = false }) {
+/**
+ * `busy` is what this dialog confirms is actually happening.
+ *
+ * Everything it asks about is a delete, and the slow ones are the big ones —
+ * emptying a ledger, clearing staging, dropping a column off temp_trans. While
+ * that request was in flight this dialog used to sit completely unchanged with
+ * both buttons live, so a second click sent a second DELETE and there was no
+ * way to tell a slow delete from one that had not registered.
+ *
+ * While busy: the confirm button spins, both buttons are disabled, and the
+ * backdrop stops closing the dialog — dismissing it would not stop the request,
+ * it would only hide the fact that one is running.
+ */
+export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', danger = false, busy = false }) {
   if (!isOpen) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={busy ? undefined : onClose}
+      />
       <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
         <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
         <p className="mt-2 text-sm text-slate-500">{message}</p>
         <div className="mt-6 flex items-center justify-end gap-3">
-          <button onClick={onClose} className="btn-secondary text-sm">
+          <button onClick={onClose} disabled={busy} className="btn-secondary text-sm">
             Cancel
           </button>
           <button
             onClick={onConfirm}
+            disabled={busy}
             className={danger ? 'btn-danger text-sm' : 'btn-primary text-sm'}
           >
+            {busy && <Spinner size="sm" tone="white" className="mr-2" />}
             {confirmText}
           </button>
         </div>

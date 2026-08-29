@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchCompanies } from '../api/endpoints.js'
+import { useReducedMotion } from '../components/UI.jsx'
 import {
   Building2, Users, ShieldAlert, Plus, KeyRound, ArrowRight, Clock,
   AlertCircle, ServerCog,
@@ -19,22 +20,10 @@ import {
 // do have, from live data, and puts the next action in reach.
 
 // ── Motion --------------------------------------------------------------------
-// Everything animated below asks this first. A tilt that follows the cursor and
-// numbers that count up are exactly what someone who has turned motion down has
-// turned down, and honouring it costs one listener.
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(
-    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  )
-  useEffect(() => {
-    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-    if (!mq) return
-    const onChange = (e) => setReduced(e.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return reduced
-}
+// Everything animated below asks useReducedMotion first. A tilt that follows
+// the cursor and numbers that count up are exactly what someone who has turned
+// motion down has turned down. It lives in UI.jsx now, because the global
+// progress indicator asks the same question and one definition is enough.
 
 // Count from zero to `target` on an ease-out curve.
 //

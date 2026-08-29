@@ -5,7 +5,7 @@ import {
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
-  Highlight, matchesNumber,
+  Highlight, matchesNumber, TableBusy, SkeletonRows,
 } from '../components/UI.jsx'
 import {
   FilterBar, SortHeader, nextSort, EMPTY_FILTERS, filterParams, activeCount,
@@ -129,6 +129,11 @@ export default function StagingPage() {
   // Refresh clear both.
   const [rulesOpen, setRulesOpen] = useState(false)
   const [conflictIds, setConflictIds] = useState(() => new Set())
+  // Which id column the last check judged, sent by the dialog. Editing that
+  // field on a red row is a fix, and the red has to go — otherwise repairing
+  // a row through the pencil looks like nothing happened, because red covers
+  // the amber that would otherwise say "edited".
+  const [conflictField, setConflictField] = useState(null)
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -302,6 +307,20 @@ export default function StagingPage() {
       // "my edit moved the row", which look identical otherwise.
       setEditedIds((prev) => new Set(prev).add(editedId))
 
+      // The rule's own field was just set by hand, so whatever the last check
+      // said about this row is now out of date. Amber takes over from red:
+      // the row is no longer reported wrong, and it is on the edited list.
+      // Only when that field was actually touched — an edit to the narration
+      // does not answer a head the rule objected to.
+      if (conflictField && conflictField in payload) {
+        setConflictIds((prev) => {
+          if (!prev.has(editedId)) return prev
+          const next = new Set(prev)
+          next.delete(editedId)
+          return next
+        })
+      }
+
       const stillHere = (data?.rows || []).some((r) => r.id === editedId)
       if (stillHere) {
         toast.success('Row updated')
@@ -468,12 +487,16 @@ export default function StagingPage() {
                 {editedIds.size + conflictIds.size === 1 ? '' : 's'}
               </button>
             )}
+            {/* The icon turns while the reload is in flight, as it already
+                does on the Ledger and Master Data — this was the one Refresh
+                in the app that gave no sign it had been pressed. */}
             <button
               onClick={() => { load(); loadFilterOptions(); clearHighlights() }}
+              disabled={loading}
               className="btn-secondary btn-sm"
             >
-              <RefreshCw className="h-3.5 w-3.5 mr-1" />
-              Refresh
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
+              {loading ? 'Refreshing' : 'Refresh'}
             </button>
             {/* Read-only until the dialog's own Replace button, so it is not
                 gated on canWrite — checking is looking, and anyone who can see
@@ -565,7 +588,14 @@ export default function StagingPage() {
       </div>
 
       <div className="card">
-        <div className="overflow-x-auto">
+        {/* relative on this wrapper rather than on the scroll container: the
+            scroller's box is as wide as the widest row, so an overlay inside
+            it would centre its spinner somewhere off to the right. And not on
+            the card either — that would cover the pager, which has to stay
+            clickable so a slow page can be stepped away from. */}
+        <div className="relative">
+          {loading && rows.length > 0 && <TableBusy />}
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/50">
@@ -599,8 +629,16 @@ export default function StagingPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={columns.length + 1} className="px-6 py-12"><Spinner /></td></tr>
+              {/* Only for the very first load, when there is nothing to keep
+                  on screen. Every reload after that keeps its rows and dims
+                  them — the table used to empty itself on every page turn,
+                  sort and keystroke, which collapsed the layout and snapped it
+                  back each time. */}
+              {loading && rows.length === 0 ? (
+                // The column set arrives with the rows, so on the very first
+                // load there is nothing to count yet — six is a table-shaped
+                // guess for that one render.
+                <SkeletonRows cols={columns.length ? columns.length + 1 : 6} />
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + 1}>
@@ -723,9 +761,16 @@ export default function StagingPage() {
                                     : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                               >
-                                {row.is_locked
-                                  ? <Lock className="h-3.5 w-3.5" />
-                                  : <Unlock className="h-3.5 w-3.5" />}
+                                {/* The padlock is its own feedback — it is
+                                    the control and the state at once — so
+                                    while the toggle is in flight it becomes a
+                                    spinner rather than sitting in the state it
+                                    is about to leave. */}
+                                {lockBusy === row.id
+                                  ? <Spinner size="sm" tone={row.is_locked ? 'white' : 'slate'} className="h-3.5 w-3.5" />
+                                  : row.is_locked
+                                    ? <Lock className="h-3.5 w-3.5" />
+                                    : <Unlock className="h-3.5 w-3.5" />}
                               </button>
                               <button
                                 onClick={() => openEdit(row)}
@@ -758,6 +803,7 @@ export default function StagingPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         <Pagination
@@ -862,6 +908,7 @@ export default function StagingPage() {
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setTarget(null)} className="btn-secondary text-sm">Cancel</button>
               <button onClick={handleSaveEdit} disabled={saving || optionsLoading} className="btn-primary text-sm">
+                {saving && <Spinner size="sm" tone="white" className="mr-2" />}
                 {saving ? 'Saving...' : 'Save changes'}
               </button>
             </div>
@@ -873,7 +920,7 @@ export default function StagingPage() {
         isOpen={rulesOpen}
         onClose={() => setRulesOpen(false)}
         canWrite={canWrite}
-        onChecked={(ids) => setConflictIds(ids)}
+        onChecked={(ids, field) => { setConflictIds(ids); setConflictField(field) }}
         onApplied={async (ids) => {
           // Fixed rows go from red to amber — no longer wrong, but changed,
           // and the amber is the record of what this session touched.
@@ -906,6 +953,7 @@ export default function StagingPage() {
           'again. This cannot be undone.'
         }
         confirmText={clearing ? 'Clearing...' : 'Clear everything'}
+        busy={clearing}
         danger
       />
 
@@ -923,6 +971,7 @@ export default function StagingPage() {
             : ''
         }
         confirmText={deleting ? 'Removing...' : 'Remove row'}
+        busy={deleting}
         danger
       />
     </div>

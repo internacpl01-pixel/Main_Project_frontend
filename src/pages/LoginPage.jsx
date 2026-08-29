@@ -87,7 +87,9 @@ export default function LoginPage() {
                 disabled={loading}
                 className="btn-primary w-full py-2.5"
               >
-                {loading ? <Spinner size="sm" className="mr-2" /> : null}
+                {/* tone="white": this sits on a primary-600 button, and the
+                    spinner's own primary-600 made it invisible. */}
+                {loading ? <Spinner size="sm" tone="white" className="mr-2" /> : null}
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>

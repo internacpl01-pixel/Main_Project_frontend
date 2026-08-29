@@ -14,13 +14,62 @@ export const api = axios.create({
   timeout: DEFAULT_TIMEOUT_MS,
 })
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+/**
+ * How many requests are in flight right now.
+ *
+ * Kept here rather than in a page, because this file is the one place every
+ * request already passes through — a counter anywhere else would only know
+ * about the calls that remembered to tell it. The global progress indicator
+ * reads this, so any screen gets "the app is working" for free, including
+ * screens written after it.
+ *
+ * A plain module counter plus a listener set: React 18's useSyncExternalStore
+ * subscribes to exactly this shape, so there is no store library and no
+ * provider to thread through the tree.
+ */
+let inFlight = 0
+const busyListeners = new Set()
+const emitBusy = () => busyListeners.forEach((fn) => fn())
+
+export function subscribeBusy(fn) {
+  busyListeners.add(fn)
+  return () => busyListeners.delete(fn)
+}
+
+export function busyCount() {
+  return inFlight
+}
+
+// Counting has to be symmetrical or the indicator never switches off, so every
+// path that can start a request pairs with a path that can end one — including
+// the request interceptor's own error arm, which fires when a request is
+// rejected before it is ever sent.
+const startedBusy = (config) => {
+  if (config?.silent) return
+  inFlight += 1
+  emitBusy()
+}
+
+const finishedBusy = (config) => {
+  if (config?.silent) return
+  inFlight = Math.max(0, inFlight - 1)
+  emitBusy()
+}
+
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    startedBusy(config)
+    return config
+  },
+  (error) => {
+    finishedBusy(error?.config)
+    return Promise.reject(error)
   }
-  return config
-})
+)
 
 /**
  * Turn any FastAPI error payload into a readable sentence.
@@ -80,8 +129,15 @@ function describeError(error) {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    finishedBusy(response.config)
+    return response
+  },
   (error) => {
+    // Before anything else, and in this arm as well as the other one: a failed
+    // request is a finished request, and an indicator that only counted the
+    // successes would stay lit forever the first time the server went away.
+    finishedBusy(error?.config)
     // Handle 401 — token expired or invalid.
     // Only bounce to /login when we are not already there, otherwise a failed
     // login reloads the page and wipes the error message before it can be read.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchTransactions, fetchSummary, fetchBatches, fetchProjects, fetchTempImport } from '../api/endpoints.js'
-import { Spinner, EmptyState } from '../components/UI.jsx'
+import { EmptyState } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { Receipt, FolderKanban, Upload, ArrowUpRight, ArrowDownRight, Activity, FileSpreadsheet, Download } from 'lucide-react'
 
@@ -102,7 +102,51 @@ export default function DashboardPage() {
       />
 
       {loading ? (
-        <Spinner size="lg" />
+        // The dashboard fires five requests at once and waits for all of them,
+        // so this is the longest first paint in the app. It used to be a bare
+        // spinner against an empty page, and the whole layout then snapped in
+        // at once. Grey blocks in the shape of what is coming instead: the
+        // page is already the right size when the numbers arrive.
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="card animate-pulse">
+                <div className="card-body">
+                  <div className="flex items-center justify-between">
+                    <div className="h-3 w-24 rounded bg-slate-100" />
+                    <div className="h-9 w-9 rounded-lg bg-slate-100" />
+                  </div>
+                  <div className="mt-3 h-7 w-28 rounded bg-slate-100" />
+                  <div className="mt-2 h-3 w-20 rounded bg-slate-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 card animate-pulse">
+              <div className="card-header"><div className="h-3.5 w-40 rounded bg-slate-100" /></div>
+              <div className="divide-y divide-slate-100">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-center justify-between px-6 py-3.5">
+                    <div className="space-y-2">
+                      <div className="h-3 w-56 rounded bg-slate-100" />
+                      <div className="h-2.5 w-36 rounded bg-slate-100" />
+                    </div>
+                    <div className="h-3 w-20 rounded bg-slate-100" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="card animate-pulse">
+              <div className="card-header"><div className="h-3.5 w-28 rounded bg-slate-100" /></div>
+              <div className="card-body space-y-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="h-4 w-full rounded bg-slate-100" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

@@ -406,9 +406,26 @@ export async function applyTempRules(payload) {
 // that when a file really is too big the server's explanation wins the race.
 const IMPORT_TIMEOUT_MS = 300000
 
+/**
+ * Report how much of the file has reached the server, 0-100.
+ *
+ * The upload is its own wait, and on a 25 MB statement over a home connection
+ * it is the longer half. Until this existed the button said "Parsing PDF..."
+ * from the moment it was pressed — through an upload during which the server
+ * had not yet seen a single byte, let alone started parsing.
+ *
+ * `total` is absent when the browser cannot know the size; the callback is
+ * simply not made in that case rather than reporting a made-up figure.
+ */
+const uploadProgress = (onUploadPercent) => (
+  onUploadPercent
+    ? (e) => { if (e.total) onUploadPercent(Math.round((e.loaded * 100) / e.total)) }
+    : undefined
+)
+
 export async function importPdf(file, save = false, bankId = null, password = '',
                                 { pages = '', background = false,
-                                  batchPages = null } = {}) {
+                                  batchPages = null, onUploadPercent } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -430,6 +447,7 @@ export async function importPdf(file, save = false, bankId = null, password = ''
   const { data } = await api.post('/imports/pdf', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
+    onUploadProgress: uploadProgress(onUploadPercent),
   })
   return data
 }
@@ -446,7 +464,12 @@ export async function importPdf(file, save = false, bankId = null, password = ''
 // finished batch so the screen can keep showing what is already done.
 // batch_index 0 is the one-page header probe, which is not a numbered batch.
 export async function fetchImportJob(jobId) {
-  const { data } = await api.get(`/imports/jobs/${jobId}`)
+  // silent: kept out of the global progress indicator. This fires every 900ms
+  // for the whole life of an import, which would pin the stripe on for minutes
+  // and turn "the app is working" into background noise that means nothing.
+  // The import screen draws its own bar from these readings, which is a real
+  // measurement rather than a generic one.
+  const { data } = await api.get(`/imports/jobs/${jobId}`, { silent: true })
   return data
 }
 
@@ -488,12 +511,13 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
 // The spreadsheet equivalent of the PDF page selector, and it has to run first:
 // a workbook holds one sheet per bank account and the tab names alone do not
 // say which are statements or how many rows each holds. Nothing is written.
-export async function inspectExcel(file) {
+export async function inspectExcel(file, { onUploadPercent } = {}) {
   const form = new FormData()
   form.append('file', file)
   const { data } = await api.post('/imports/excel/inspect', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
+    onUploadProgress: uploadProgress(onUploadPercent),
   })
   return data
 }
@@ -501,7 +525,8 @@ export async function inspectExcel(file) {
 // `sheets` is a comma-separated list of sheet names; blank imports every sheet
 // that looks like a statement. Each sheet becomes its own batch.
 export async function importExcel(file, save = false, bankId = null,
-                                  { sheets = '', background = false } = {}) {
+                                  { sheets = '', background = false,
+                                    onUploadPercent } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -511,12 +536,13 @@ export async function importExcel(file, save = false, bankId = null,
   const { data } = await api.post('/imports/excel', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
+    onUploadProgress: uploadProgress(onUploadPercent),
   })
   return data
 }
 
 export async function importCsv(file, save = false, bankId = null,
-                                { background = false } = {}) {
+                                { background = false, onUploadPercent } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -525,6 +551,7 @@ export async function importCsv(file, save = false, bankId = null,
   const { data } = await api.post('/imports/csv', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
+    onUploadProgress: uploadProgress(onUploadPercent),
   })
   return data
 }

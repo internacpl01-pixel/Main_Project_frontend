@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchProjects, createProject, updateProject, deleteProject } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, TableBusy, SkeletonRows,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -109,6 +111,11 @@ export default function ProjectsPage() {
 
       {!error && (
         <div className="card">
+          {/* The wrapper holds the overlay, not the scroller: a scroller is as
+              wide as its widest row, so a spinner centred in it can land
+              off-screen. */}
+          <div className="relative">
+          {loading && items.length > 0 && <TableBusy />}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -121,8 +128,10 @@ export default function ProjectsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr><td colSpan="5" className="px-6 py-12"><Spinner /></td></tr>
+                {loading && items.length === 0 ? (
+                  // Skeletons on the first load, so the card keeps its height;
+                  // a reload keeps the rows and dims them instead.
+                  <SkeletonRows cols={5} rows={5} />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan="5">
@@ -182,6 +191,7 @@ export default function ProjectsPage() {
               </tbody>
             </table>
           </div>
+          </div>
         </div>
       )}
 
@@ -218,6 +228,7 @@ export default function ProjectsPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
             </button>
           </div>
@@ -230,7 +241,8 @@ export default function ProjectsPage() {
         onConfirm={handleDelete}
         title="Delete Project"
         message={`Delete "${deleteConfirm?.name}"? This cannot be undone.`}
-        confirmText="Delete"
+        confirmText={saving ? 'Deleting...' : 'Delete'}
+        busy={saving}
         danger
       />
     </div>

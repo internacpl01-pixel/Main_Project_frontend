@@ -3,7 +3,9 @@ import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
   importBeneficiaries, deleteAllBeneficiaries, fetchProjects,
 } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, TableBusy, SkeletonRows,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -65,6 +67,9 @@ export default function MasterDataPage() {
   const [onCrossCompany, setOnCrossCompany] = useState('add')
   const [importBusy, setImportBusy] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
+  // Emptying the beneficiary table archives everything the ledger has booked
+  // against and unlinks the staged rows, so it is slow enough to need saying.
+  const [clearing, setClearing] = useState(false)
 
   const config = schema.find((s) => s.key === masterType) || null
 
@@ -259,7 +264,7 @@ export default function MasterDataPage() {
   }
 
   const runClearAll = async () => {
-    setClearOpen(false)
+    setClearing(true)
     try {
       const r = await deleteAllBeneficiaries()
       const parts = [`${r.deleted} deleted`]
@@ -268,9 +273,14 @@ export default function MasterDataPage() {
       if (r.archived) parts.push(`${r.archived} archived (used by the ledger)`)
       if (r.unlinked_staged_rows) parts.push(`${r.unlinked_staged_rows} staged rows unlinked`)
       toast.success(parts.join(', '))
+      // Closed on success, not on click: the dialog is what shows the delete
+      // running and what stops a second one being sent while it does.
+      setClearOpen(false)
       load()
     } catch (err) {
       toast.error(err.message)
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -410,7 +420,7 @@ export default function MasterDataPage() {
         />
         <div className="flex items-center gap-2">
           <button onClick={load} disabled={loading} className="btn-secondary">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
           </button>
           {canWrite && config.importable && (
             <button onClick={openImport} className="btn-secondary">
@@ -438,7 +448,14 @@ export default function MasterDataPage() {
       {/* Table */}
       <div className="card">
         {loading && allItems.length === 0 ? (
-          <div className="px-6 py-16 flex justify-center"><Spinner size="lg" /></div>
+          // A skeleton in the shape of this tab's own columns, which the
+          // schema already told us before the rows were asked for. The list
+          // keeps its height, so switching tabs no longer collapses the card.
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-slate-100">
+              <SkeletonRows cols={(config.fields?.length || 3) + 3} />
+            </tbody>
+          </table>
         ) : totalItems === 0 ? (
           <EmptyState
             title={search ? 'No matching results' : `No ${config.label.toLowerCase()}s yet`}
@@ -452,6 +469,10 @@ export default function MasterDataPage() {
           />
         ) : (
           <>
+            {/* The wrapper carries the overlay: the scroller is as wide as its
+                widest row, and the card below holds the pager. */}
+            <div className="relative">
+            {loading && allItems.length > 0 && <TableBusy />}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -522,6 +543,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
+            </div>
 
             {/* Pagination */}
             <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200">
@@ -575,6 +597,7 @@ export default function MasterDataPage() {
         onClose={() => setClearOpen(false)}
         onConfirm={runClearAll}
         danger
+        busy={clearing}
         title={`Delete all ${totalItems} ${config?.label?.toLowerCase() ?? ''} records?`}
         message={
           'This removes every row in the table and cannot be undone. Anyone the ' +
@@ -582,7 +605,7 @@ export default function MasterDataPage() {
           'because removing them would break those transactions. Staged rows ' +
           'keep their data but lose the beneficiary and need it picked again.'
         }
-        confirmText="Delete all"
+        confirmText={clearing ? 'Deleting...' : 'Delete all'}
       />
 
       {/* Sheet import */}
@@ -796,6 +819,7 @@ export default function MasterDataPage() {
                          preview.cross_company_count === 0)}
               className="btn-primary text-sm"
             >
+              {importBusy && <Spinner size="sm" tone="white" className="mr-2" />}
               {importBusy ? 'Importing…' : 'Import'}
             </button>
           </div>
@@ -856,6 +880,7 @@ export default function MasterDataPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
             </button>
           </div>
@@ -872,7 +897,8 @@ export default function MasterDataPage() {
           `Delete "${deleteTarget?.[config.fields[0]?.key] || 'this entry'}"? ` +
           'This cannot be undone.'
         }
-        confirmText="Delete"
+        confirmText={saving ? 'Deleting...' : 'Delete'}
+        busy={saving}
         danger
       />
     </div>

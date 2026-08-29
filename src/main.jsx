@@ -10,6 +10,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import App from './App.jsx'
+import GlobalProgress from './components/GlobalProgress.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 
 // Tailwind v4 import (postcss will handle the rest)
@@ -19,6 +20,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
+        {/* Outside <App> on purpose: the login screen and the session
+            bootstrap both make requests before any route has rendered, and
+            those are exactly the waits that used to show nothing at all. */}
+        <GlobalProgress />
         <App />
         <Toaster
           position="bottom-right"

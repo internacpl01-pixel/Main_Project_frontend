@@ -5,7 +5,8 @@ import {
   fetchDeleteCheck, deleteCompany, addCompanyAdmin,
 } from '../api/endpoints.js'
 import {
-  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput,
+  Modal, Spinner, EmptyState, ConfirmDialog, PasswordInput, TableBusy,
+  SkeletonRows,
 } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
@@ -354,6 +355,10 @@ export default function CompaniesPage() {
 
       {!error && (
         <div className="card">
+          {/* Overlay on the wrapper, not the scroller — a scroller is as wide
+              as its widest row, so a centred spinner can land off-screen. */}
+          <div className="relative">
+          {loading && items.length > 0 && <TableBusy />}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -369,8 +374,8 @@ export default function CompaniesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr><td colSpan="8" className="px-6 py-12"><Spinner /></td></tr>
+                {loading && items.length === 0 ? (
+                  <SkeletonRows cols={8} rows={5} />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan="8">
@@ -463,6 +468,7 @@ export default function CompaniesPage() {
                 )}
               </tbody>
             </table>
+          </div>
           </div>
         </div>
       )}
@@ -694,6 +700,7 @@ export default function CompaniesPage() {
               <div className="flex gap-3">
                 <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
                 <button onClick={handleRegister} disabled={saving} className="btn-primary text-sm">
+                  {saving && <Spinner size="sm" tone="white" className="mr-2" />}
                   {saving
                     ? (form.source === 'copy' ? 'Copying...' : 'Registering...')
                     : (form.source === 'copy' ? 'Create Copy' : 'Register')}
@@ -720,6 +727,7 @@ export default function CompaniesPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setRenaming(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleRename} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
@@ -771,6 +779,7 @@ export default function CompaniesPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setAddingAdmin(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleAddAdmin} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Creating...' : 'Create Admin'}
             </button>
           </div>
@@ -803,6 +812,7 @@ export default function CompaniesPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setCodeTarget(null)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleSetCode} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Set Code'}
             </button>
           </div>
@@ -880,6 +890,7 @@ export default function CompaniesPage() {
                 disabled={saving || deleteTyped.trim() !== deleting.company.name}
                 className="btn-primary text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-300"
               >
+                {saving && <Spinner size="sm" tone="white" className="mr-2" />}
                 {saving ? 'Deleting...' : 'Delete permanently'}
               </button>
             </div>
@@ -897,7 +908,12 @@ export default function CompaniesPage() {
             ? `Deactivate "${statusConfirm?.name}"? Nobody will be able to switch into it. No data is deleted — reactivate any time.`
             : `Activate "${statusConfirm?.name}"? It becomes available to switch into again.`
         }
-        confirmText={statusConfirm?.is_active ? 'Deactivate' : 'Activate'}
+        confirmText={
+          saving
+            ? (statusConfirm?.is_active ? 'Deactivating...' : 'Activating...')
+            : (statusConfirm?.is_active ? 'Deactivate' : 'Activate')
+        }
+        busy={saving}
         danger={statusConfirm?.is_active}
       />
     </div>

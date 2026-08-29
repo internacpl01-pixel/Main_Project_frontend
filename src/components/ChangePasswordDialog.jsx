@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { changePassword } from '../api/endpoints.js'
-import { Modal, PasswordInput } from './UI.jsx'
+import { Modal, PasswordInput, Spinner } from './UI.jsx'
 import toast from 'react-hot-toast'
 import { AlertCircle } from 'lucide-react'
 
@@ -130,6 +130,7 @@ export default function ChangePasswordDialog({ isOpen, onClose, onChanged }) {
             disabled={!ready || saving}
             className="btn-primary text-sm"
           >
+            {saving && <Spinner size="sm" tone="white" className="mr-2" />}
             {saving ? 'Changing...' : 'Change Password'}
           </button>
         </div>

@@ -2,7 +2,10 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   fetchFieldMappings, updateFieldMapping, deleteFieldMapping,
 } from '../api/endpoints.js'
-import { Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, MethodInput, MethodBadge } from '../components/UI.jsx'
+import {
+  Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, MethodInput,
+  MethodBadge, TableBusy, SkeletonRows,
+} from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -130,8 +133,14 @@ export default function FieldMappingPage() {
           />
         </div>
 
-        {loading ? (
-          <div className="px-6 py-16"><Spinner size="lg" /></div>
+        {loading && mappings.length === 0 ? (
+          // Skeletons keep the card's height, so it does not collapse and snap
+          // back every time the list is re-read.
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-slate-100">
+              <SkeletonRows cols={7} rows={5} />
+            </tbody>
+          </table>
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<GripVertical className="h-10 w-10" />}
@@ -143,6 +152,10 @@ export default function FieldMappingPage() {
             }
           />
         ) : (
+          <div className="relative">
+          {/* Overlay on the wrapper, not the scroller — a scroller is as wide
+              as its widest row, so a centred spinner can land off-screen. */}
+          {loading && <TableBusy />}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -227,6 +240,7 @@ export default function FieldMappingPage() {
               </tbody>
             </table>
           </div>
+          </div>
         )}
       </div>
 
@@ -297,6 +311,7 @@ export default function FieldMappingPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setModalOpen(false)} className="btn-secondary text-sm">Cancel</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
+              {saving && <Spinner size="sm" tone="white" className="mr-2" />}
               {saving ? 'Saving...' : 'Update'}
             </button>
           </div>
@@ -309,7 +324,8 @@ export default function FieldMappingPage() {
         onConfirm={handleDelete}
         title="Delete Mapping"
         message={`Delete "${deleteTarget?.displayname}"? Existing staged rows keep their values, but new imports won't recognize this header.`}
-        confirmText="Delete"
+        confirmText={saving ? 'Deleting...' : 'Delete'}
+        busy={saving}
         danger
       />
     </div>
