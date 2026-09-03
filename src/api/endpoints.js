@@ -404,7 +404,7 @@ export async function applyTempRules(payload) {
 // — so nothing here or on the page names either.
 
 export async function fetchRuleMatrix() {
-  // { heads, account_types, directions, cells: {headId: {TYPE: 'CR'|'DR'|'BOTH'}}, target }
+  // { heads, account_types, directions, cells: {headId: {TYPE: 'CR'|'DR'}}, target }
   // A head/type pair with no entry in `cells` has no rule and is not offered.
   const { data } = await api.get('/rules/matrix')
   return data

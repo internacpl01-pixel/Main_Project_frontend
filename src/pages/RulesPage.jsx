@@ -10,10 +10,10 @@ import { RefreshCw, ShieldCheck, ScrollText, ArrowRight } from 'lucide-react'
 // The rule, as a grid.
 //
 // One row per head, one column per account type, and each cell says what that
-// head means on that kind of account: money in (CR), money out (DR), either
-// (Both), or nothing at all. "Master 2 RERA" is money leaving the Master
-// account and arriving in the RERA account, so it is DR under MASTER and CR
-// under RERA, and blank under IDW and FREE.
+// head means on that kind of account: money in (CR), money out (DR), or nothing
+// at all. "Master 2 RERA" is money leaving the Master account and arriving in
+// the RERA account, so it is DR under MASTER and CR under RERA, and blank under
+// IDW and FREE.
 //
 // This grid IS the rule. Check Rules reads it to decide which staged rows are
 // wrong and to fill its Replace dropdown, so a head left blank for a type is
@@ -30,11 +30,8 @@ const BLANK = ''
 const CELL_TONES = {
   CR: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   DR: 'border-red-200 bg-red-50 text-red-700',
-  BOTH: 'border-violet-200 bg-violet-50 text-violet-700',
   [BLANK]: 'border-slate-200 bg-white text-slate-400',
 }
-
-const CELL_LABELS = { CR: 'CR', DR: 'DR', BOTH: 'Both' }
 
 export default function RulesPage() {
   // Managers and above may change the rule; everyone may read it. The API
@@ -83,9 +80,8 @@ export default function RulesPage() {
     heads.forEach((h) => {
       const row = cells[String(h.id)] || {}
       types.forEach((t) => {
-        const v = row[t]
-        if (v === 'CR' || v === 'BOTH') out[t].cr += 1
-        if (v === 'DR' || v === 'BOTH') out[t].dr += 1
+        if (row[t] === 'CR') out[t].cr += 1
+        if (row[t] === 'DR') out[t].dr += 1
       })
     })
     return out
@@ -279,8 +275,8 @@ export default function RulesPage() {
                                       ${CELL_TONES[value] || CELL_TONES[BLANK]}`}
                                   >
                                     <option value={BLANK}>—</option>
-                                    {(matrix?.directions || ['BOTH', 'CR', 'DR']).map((d) => (
-                                      <option key={d} value={d}>{CELL_LABELS[d] || d}</option>
+                                    {(matrix?.directions || ['CR', 'DR']).map((d) => (
+                                      <option key={d} value={d}>{d}</option>
                                     ))}
                                   </select>
                                   {busyCell === key && (
