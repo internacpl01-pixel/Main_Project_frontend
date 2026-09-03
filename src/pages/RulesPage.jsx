@@ -19,8 +19,9 @@ import { RefreshCw, ShieldCheck, ScrollText, ArrowRight } from 'lucide-react'
 // wrong and to fill its Replace dropdown, so a head left blank for a type is
 // never offered there and never accepted there.
 //
-// Heads now come from all three masters (head_master, rera_head_master,
-// idw_head_master) — one row per head, keyed by its master_kind and id.
+// Neither axis is written down here. The rows come from the RERA Head master
+// and the columns from the Type of Account master, both read live, so adding
+// either on the Master Data page changes this grid with nothing to deploy.
 
 // A blank cell is the absence of a rule, so the empty option carries no value
 // and clearing sends null. The rest are the server's own list.
@@ -60,15 +61,8 @@ export default function RulesPage() {
 
   useEffect(() => { load() }, [load])
 
-  // heads_by_kind is {head: [...], rera_head: [...], idw_head: [...]}
-  const headsByKind = matrix?.heads_by_kind || {}
-  // Flatten into a single list, preserving master_kind on each entry.
-  const heads = useMemo(
-    () => Object.values(headsByKind).flat(),
-    [headsByKind],
-  )
+  const heads = matrix?.heads || []
   const types = matrix?.account_types || []
-  // Cells are keyed "master_kind:head_id" -> {account_type: direction, ...}
   const cells = matrix?.cells || {}
 
   const needle = search.trim().toLowerCase()
@@ -86,7 +80,7 @@ export default function RulesPage() {
     const out = {}
     types.forEach((t) => { out[t] = { cr: 0, dr: 0 } })
     heads.forEach((h) => {
-      const row = cells[`${h.master_kind}:${h.id}`] || {}
+      const row = cells[String(h.id)] || {}
       types.forEach((t) => {
         if (row[t] === 'CR') out[t].cr += 1
         if (row[t] === 'DR') out[t].dr += 1
@@ -101,8 +95,8 @@ export default function RulesPage() {
   )
 
   const handleChange = async (head, type, value) => {
-    const rowKey = `${head.master_kind}:${head.id}`
-    const key = `${rowKey}:${type}`
+    const rowKey = String(head.id)
+    const key = `${head.id}:${type}`
     const previous = cells[rowKey]?.[type]
     // Painted immediately, put back if the server refuses. A dropdown that
     // waits for a round trip before showing what was picked reads as broken.
@@ -116,7 +110,7 @@ export default function RulesPage() {
     })
     setBusyCell(key)
     try {
-      await setRuleCell(head.id, head.master_kind, type, value === BLANK ? null : value)
+      await setRuleCell(head.id, type, value === BLANK ? null : value)
     } catch (err) {
       toast.error(err.message)
       setMatrix((m) => {
@@ -196,10 +190,10 @@ export default function RulesPage() {
         {!loading && matrix && (heads.length === 0 || types.length === 0) ? (
           <EmptyState
             icon={<ShieldCheck className="h-10 w-10" />}
-            title="No heads yet"
+            title={heads.length === 0 ? 'No heads yet' : 'No account types yet'}
             description={
               heads.length === 0
-                ? `Add entries under Master Data, and they appear here as rows.`
+                ? `Add entries under Master Data → ${matrix.target?.label || 'RERA Head'}, and they appear here as rows.`
                 : 'Add entries under Master Data → Type of Account, and they appear here as columns.'
             }
             action={
@@ -214,7 +208,7 @@ export default function RulesPage() {
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50/50">
                     <th className="sticky left-0 z-10 bg-slate-50 px-6 py-3 text-left text-xs font-medium tracking-wide text-slate-500">
-                      Head
+                      {matrix?.target?.label || 'Head'}
                     </th>
                     {types.map((t) => (
                       <th key={t} className="px-4 py-3 text-center text-xs font-medium tracking-wide text-slate-500">
@@ -247,10 +241,10 @@ export default function RulesPage() {
                     </tr>
                   ) : (
                     shown.map((h) => {
-                      const row = cells[`${h.master_kind}:${h.id}`] || {}
+                      const row = cells[String(h.id)] || {}
                       const used = Object.keys(row).length
                       return (
-                        <tr key={`${h.master_kind}:${h.id}`} className="hover:bg-slate-50/70 transition-colors">
+                        <tr key={h.id} className="hover:bg-slate-50/70 transition-colors">
                           {/* Sticky, because with several account types the
                               grid scrolls sideways and a cell whose head has
                               scrolled off is a cell you cannot safely set. */}
@@ -266,7 +260,7 @@ export default function RulesPage() {
                           </td>
                           {types.map((t) => {
                             const value = row[t] || BLANK
-                            const key = `${h.master_kind}:${h.id}:${t}`
+                            const key = `${h.id}:${t}`
                             return (
                               <td key={t} className="px-2 py-2 text-center">
                                 <div className="relative inline-block">
