@@ -426,6 +426,55 @@ export async function fetchRuleSummary() {
   return data
 }
 
+// ── Rule conditions ──────────────────────────────────────────────────────────
+// The exception to the grid: "a RERA debit whose narration mentions REFUND is a
+// Cust Cancellation". Conditions are read first and the first one that matches
+// decides a row on its own; anything they do not describe falls back to the grid.
+
+// Everything the builder needs, in one response — the conditions themselves plus
+// the columns, operators, heads and account types its dropdowns are filled from.
+// The operator list in particular is the server's, never a copy in the browser,
+// so the page cannot offer a test the check does not implement.
+export async function fetchConditions() {
+  const { data } = await api.get('/rules/conditions')
+  return data
+}
+
+// `payload` is {account_type, direction, subject_field, operator, value1,
+// value2, head_ids, is_active}. head_ids is ordered: the first is what the
+// Replace dropdown preselects.
+export async function createCondition(payload) {
+  const { data } = await api.post('/rules/conditions', payload)
+  return data
+}
+
+export async function updateCondition(id, payload) {
+  const { data } = await api.put(`/rules/conditions/${id}`, payload)
+  return data
+}
+
+export async function deleteCondition(id) {
+  const { data } = await api.delete(`/rules/conditions/${id}`)
+  return data
+}
+
+// The whole group in the order it should decide, not "move this one up", so the
+// result cannot depend on what this tab thought the old order was.
+export async function reorderConditions(accountType, direction, ids) {
+  const { data } = await api.post('/rules/conditions/reorder', {
+    account_type: accountType, direction, ids,
+  })
+  return data
+}
+
+// Run an unsaved test against the rows actually staged for that account type.
+// Takes no heads — this asks only "how many of my rows does this describe?",
+// which is the half worth checking before committing to an answer.
+export async function previewCondition(payload) {
+  const { data } = await api.post('/rules/conditions/preview', payload)
+  return data
+}
+
 // ── Import / Upload ──────────────────────────────────────────────────────────
 
 // Parsing is measured in seconds per page, so a long statement runs for

@@ -29,6 +29,17 @@ const fmtAmount = (n) =>
 // The same reduction the server matches accounts by.
 const accountDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^0+/, '')
 
+// What this row in particular may be replaced with.
+//
+// A row carries rule_id when a condition decided it, and that condition's heads
+// are then the only answer — not the grid's, which may be a different and wider
+// set. Reading it from the same place the check did is the whole point: the
+// dropdown cannot offer a head the server would refuse on apply.
+const allowedFor = (result, row) => {
+  const cond = row.rule_id != null && result.conditions?.[String(row.rule_id)]
+  return (cond ? cond.heads : result.expected[row.direction]) || []
+}
+
 export default function CheckRulesDialog({
   isOpen, onClose, canWrite, onChecked, onApplied,
 }) {
@@ -113,7 +124,7 @@ export default function CheckRulesDialog({
       const defaults = {}
       data.rows.forEach((r) => {
         if (r.status !== 'conflict') return
-        defaults[r.id] = data.expected[r.direction]?.[0]?.id
+        defaults[r.id] = allowedFor(data, r)[0]?.id
       })
       setChoices(defaults)
       // Paint the conflicting rows red on the table behind this dialog, so
@@ -189,10 +200,17 @@ export default function CheckRulesDialog({
               </option>
               {types.map((t) => {
                 const c = ruleCounts[(t || '').toUpperCase()]
+                // A type can have a rule made only of conditions, so "no rule
+                // set" has to mean neither — not just an empty grid column.
+                const parts = []
+                if (c?.total) parts.push(`${c.cr} CR, ${c.dr} DR`)
+                if (c?.conditions) {
+                  parts.push(`${c.conditions} condition${c.conditions === 1 ? '' : 's'}`)
+                }
                 return (
                   <option key={t} value={t}>
                     {t}
-                    {c ? ` · ${c.cr} CR, ${c.dr} DR` : ' · no rule set'}
+                    {parts.length ? ` · ${parts.join(' · ')}` : ' · no rule set'}
                   </option>
                 )
               })}
@@ -286,6 +304,30 @@ export default function CheckRulesDialog({
                   </p>
                 )
               ))}
+              {/* The conditions that ran alongside it, in the order they
+                  decided. Shown whether or not any row matched one: knowing a
+                  sentence exists and caught nothing is worth as much as seeing
+                  it catch something. */}
+              {Object.keys(result.conditions || {}).length > 0 && (
+                <div className="mt-2 border-t border-slate-200 pt-2">
+                  <p className="text-xs font-medium text-slate-500">
+                    Conditions, checked before the grid
+                  </p>
+                  {Object.entries(result.conditions).map(([id, c]) => {
+                    const hit = result.rows.filter(
+                      (r) => String(r.rule_id) === id).length
+                    return (
+                      <p key={id} className="text-slate-600">
+                        <span className="font-mono font-medium">{c.direction}</span>
+                        {' → '}{c.sentence}
+                        <span className="text-slate-400">
+                          {' '}— {hit} {hit === 1 ? 'row' : 'rows'} here
+                        </span>
+                      </p>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {result.summary.conflicts === 0 ? (
@@ -319,7 +361,9 @@ export default function CheckRulesDialog({
                     </thead>
                     <tbody className="divide-y divide-red-100">
                       {conflicts.map((r) => {
-                        const allowed = result.expected[r.direction] || []
+                        const allowed = allowedFor(result, r)
+                        const cond = r.rule_id != null
+                          && result.conditions?.[String(r.rule_id)]
                         return (
                           <tr key={r.id} className={`bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`}>
                             <td className="px-3 py-2 whitespace-nowrap">{r.txn_date || '—'}</td>
@@ -327,6 +371,17 @@ export default function CheckRulesDialog({
                             <td className="px-3 py-2 font-mono">{r.direction}</td>
                             <td className="px-3 py-2 text-red-700">
                               {r.current_name || <span className="italic">not set</span>}
+                              {/* Which sentence judged this row. Only shown when
+                                  a condition did — "the grid" is the default and
+                                  saying so on every row would be noise. */}
+                              {cond && (
+                                <span
+                                  className="ml-1 rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[10px] font-medium text-violet-700"
+                                  title={cond.sentence}
+                                >
+                                  by condition
+                                </span>
+                              )}
                             </td>
                             <td className="px-3 py-2">
                               {r.is_locked ? (

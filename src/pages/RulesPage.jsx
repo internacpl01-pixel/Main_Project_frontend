@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { fetchRuleMatrix, setRuleCell } from '../api/endpoints.js'
 import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
+import ConditionsPanel from '../components/ConditionsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import { RefreshCw, ShieldCheck, ScrollText, ArrowRight } from 'lucide-react'
@@ -37,6 +38,13 @@ export default function RulesPage() {
   // Managers and above may change the rule; everyone may read it. The API
   // enforces the same split — this only spares staff dropdowns that would 403.
   const { canWrite } = useAuth()
+
+  // Which half of the rule is on screen. The grid is the default because it is
+  // the one that always has something in it; conditions start empty.
+  const [tab, setTab] = useState('grid')
+  // Kept here rather than in the panel so the tab can carry the count while the
+  // panel is unmounted. Reported by the panel each time it loads.
+  const [conditionCount, setConditionCount] = useState(0)
 
   const [matrix, setMatrix] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -137,14 +145,45 @@ export default function RulesPage() {
           'direction, and the Replace dropdown offers exactly what is marked here.'
         }
         actions={
-          <button onClick={load} disabled={loading} className="btn-secondary btn-sm">
-            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${
-              loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
-            Refresh
-          </button>
+          tab === 'grid' && (
+            <button onClick={load} disabled={loading} className="btn-secondary btn-sm">
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${
+                loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
+              Refresh
+            </button>
+          )
         }
       />
 
+      {/* Two halves of one rule, so two tabs rather than one long page: with 22
+          heads the grid is already taller than a screen, and a conditions list
+          below it would never be found. */}
+      <div className="mb-4 flex gap-1 border-b border-slate-200">
+        {[
+          { key: 'grid', label: 'Grid' },
+          {
+            key: 'conditions',
+            label: `Conditions${conditionCount ? ` (${conditionCount})` : ''}`,
+          },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors cursor-pointer ${
+              tab === t.key
+                ? 'border-primary-600 text-primary-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'conditions' ? (
+        <ConditionsPanel canWrite={canWrite} onCountChange={setConditionCount} />
+      ) : (
+      <>
       {/* What the grid means, in one line, with the example that explains the
           whole shape of it. */}
       <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
@@ -306,6 +345,8 @@ export default function RulesPage() {
         <p className="mt-3 text-xs text-slate-400">
           You can read the rule but not change it. Ask a manager to edit it.
         </p>
+      )}
+      </>
       )}
     </div>
   )
