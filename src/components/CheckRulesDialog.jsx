@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Lock, ShieldCheck } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Modal, Spinner } from './UI.jsx'
 import {
   fetchMasterData, fetchTempImportFilters, checkTempRules, applyTempRules,
+  fetchRuleSummary,
 } from '../api/endpoints.js'
 
 // The Check Rules flow: pick an account type, pick one of that type's
@@ -32,6 +34,11 @@ export default function CheckRulesDialog({
 }) {
   const [types, setTypes] = useState([])
   const [accounts, setAccounts] = useState([])
+  // How many heads each account type accepts, from the Rules page. Only used to
+  // say so on the dropdown: a type with no rule can still be picked, and the
+  // check then explains where to set one — but knowing before pressing Check
+  // saves the round trip and the red error.
+  const [ruleCounts, setRuleCounts] = useState({})
   const [loadingLists, setLoadingLists] = useState(false)
 
   const [type, setType] = useState('')
@@ -56,10 +63,13 @@ export default function CheckRulesDialog({
     Promise.all([
       fetchMasterData('account_type').catch(() => []),
       fetchTempImportFilters().catch(() => null),
-    ]).then(([typeRows, filters]) => {
+      // Not fatal: without it the dropdown simply stops annotating itself.
+      fetchRuleSummary().catch(() => ({})),
+    ]).then(([typeRows, filters, counts]) => {
       if (cancelled) return
       setTypes((Array.isArray(typeRows) ? typeRows : []).map((t) => t.name))
       setAccounts(filters?.account?.values || [])
+      setRuleCounts(counts || {})
     }).finally(() => { if (!cancelled) setLoadingLists(false) })
     return () => { cancelled = true }
   }, [isOpen])
@@ -177,12 +187,22 @@ export default function CheckRulesDialog({
                     ? 'No account types yet — add them under Master Data'
                     : '— choose a type —'}
               </option>
-              {types.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {types.map((t) => {
+                const c = ruleCounts[(t || '').toUpperCase()]
+                return (
+                  <option key={t} value={t}>
+                    {t}
+                    {c ? ` · ${c.cr} CR, ${c.dr} DR` : ' · no rule set'}
+                  </option>
+                )
+              })}
             </select>
             <p className="mt-1 text-xs text-slate-400">
-              From the Type of Account master, as the Bank master uses it.
+              From the Type of Account master, as the Bank master uses it. What
+              each type accepts is set on the{' '}
+              <Link to="/rules" className="text-primary-600 hover:underline">
+                Rules page
+              </Link>.
             </p>
           </div>
           <div>

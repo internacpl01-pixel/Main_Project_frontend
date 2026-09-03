@@ -3,7 +3,7 @@ import { useAuth, MANAGER, SUPER_ADMIN } from '../context/AuthContext.jsx'
 import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
-  FolderKanban, Database, History, KeyRound, BookOpen
+  FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
@@ -30,6 +30,9 @@ const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true, companyScoped: false },
   { to: '/projects', icon: FolderKanban, label: 'Projects' },
   { to: '/master-data', icon: Database, label: 'Master Data' },
+  // Directly under Master Data because it is built entirely from two of its
+  // tables — the heads it lists and the account types it columns by.
+  { to: '/rules', icon: ShieldCheck, label: 'Rules' },
   { to: '/custom-fields', icon: Columns3, label: 'Custom Fields' },
   { to: '/field-mapping', icon: ArrowLeftRight, label: 'Field Mapping' },
   // Sits under Field Mapping because that is what it is a history of. Manager+

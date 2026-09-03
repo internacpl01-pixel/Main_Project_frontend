@@ -397,6 +397,35 @@ export async function applyTempRules(payload) {
   return data
 }
 
+// ── Rules ────────────────────────────────────────────────────────────────────
+// The grid behind Check Rules: which heads are valid for which account type,
+// and in which direction. Both axes are live reads on the server — the heads
+// from the RERA Head master, the account types from the Type of Account master
+// — so nothing here or on the page names either.
+
+export async function fetchRuleMatrix() {
+  // { heads, account_types, directions, cells: {headId: {TYPE: 'CR'|'DR'|'BOTH'}}, target }
+  // A head/type pair with no entry in `cells` has no rule and is not offered.
+  const { data } = await api.get('/rules/matrix')
+  return data
+}
+
+// One cell. `direction` null clears it — there is no "blank" value to store,
+// because no rule and a rule saying nothing are the same state.
+export async function setRuleCell(headId, accountType, direction) {
+  const { data } = await api.put('/rules/cell', {
+    head_id: headId, account_type: accountType, direction: direction || null,
+  })
+  return data
+}
+
+// { TYPE: {cr, dr, total} } — how many heads each account type accepts. Used to
+// say whether a type has a rule at all before anyone runs a check against it.
+export async function fetchRuleSummary() {
+  const { data } = await api.get('/rules/summary')
+  return data
+}
+
 // ── Import / Upload ──────────────────────────────────────────────────────────
 
 // Parsing is measured in seconds per page, so a long statement runs for

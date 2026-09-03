@@ -9,6 +9,7 @@ import CustomFieldsPage from './pages/CustomFieldsPage.jsx'
 import FieldMappingPage from './pages/FieldMappingPage.jsx'
 import ChangeLogPage from './pages/ChangeLogPage.jsx'
 import MasterDataPage from './pages/MasterDataPage.jsx'
+import RulesPage from './pages/RulesPage.jsx'
 import StagingPage from './pages/StagingPage.jsx'
 import LedgerPage from './pages/LedgerPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
@@ -89,6 +90,9 @@ export default function App() {
             403 to staff, so an ungated route would render an error page. */}
         <Route path="change-log" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><ChangeLogPage /></LevelRoute></CompanyRoute>} />
         <Route path="master-data" element={<CompanyRoute><MasterDataPage /></CompanyRoute>} />
+        {/* Readable by everyone who can see the rows it judges; the API
+            refuses the write to anyone below manager. */}
+        <Route path="rules" element={<CompanyRoute><RulesPage /></CompanyRoute>} />
         <Route path="import" element={<CompanyRoute><ImportPage /></CompanyRoute>} />
         <Route path="staging" element={<CompanyRoute><StagingPage /></CompanyRoute>} />
         <Route path="ledger" element={<CompanyRoute><LedgerPage /></CompanyRoute>} />
