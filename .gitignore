@@ -1,2 +1,17 @@
+# Dependencies and build output. Vercel installs from package-lock.json and
+# runs the build itself -- .vercelignore says so and keeps them out of a CLI
+# deploy -- so neither belongs in the repository either. They were committed
+# before this file listed them: 7,015 files, 117 MB of node_modules built on
+# Windows, which is exactly the tree .vercelignore exists to stop shipping.
+node_modules
+dist
+.vite
+.vercel
+
+# Secrets. VITE_API_BASE_URL is set in Vercel's Environment Variables, because
+# Vite inlines it at build time and so it has to exist on the build host.
 .env
+.env.*
+!.env.example
+
 venv
