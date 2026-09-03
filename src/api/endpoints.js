@@ -412,9 +412,10 @@ export async function fetchRuleMatrix() {
 
 // One cell. `direction` null clears it — there is no "blank" value to store,
 // because no rule and a rule saying nothing are the same state.
-export async function setRuleCell(headId, accountType, direction) {
+export async function setRuleCell(headId, masterKind, accountType, direction) {
   const { data } = await api.put('/rules/cell', {
-    head_id: headId, account_type: accountType, direction: direction || null,
+    head_id: headId, master_kind: masterKind,
+    account_type: accountType, direction: direction || null,
   })
   return data
 }
