@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchRuleMatrix, setRuleCell } from '../api/endpoints.js'
-import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner } from '../components/UI.jsx'
+import { fetchRuleMatrix, setRuleCell, createMasterEntry } from '../api/endpoints.js'
+import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner, Modal } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import ConditionsPanel from '../components/ConditionsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { RefreshCw, ShieldCheck, ScrollText, ArrowRight } from 'lucide-react'
+import { RefreshCw, ShieldCheck, ScrollText, ArrowRight, Plus } from 'lucide-react'
 
 // The rule, as a grid.
 //
@@ -71,6 +71,12 @@ export default function RulesPage() {
   // Which cell is mid-flight, so a slow save shows and a second click on the
   // same cell cannot race the first.
   const [busyCell, setBusyCell] = useState(null)
+
+  // The "Add head" dialog. A new head has no data yet, so all it needs is a
+  // name — it lands with every cell blank, same as any other unused row.
+  const [addOpen, setAddOpen] = useState(false)
+  const [newHeadName, setNewHeadName] = useState('')
+  const [addBusy, setAddBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -180,6 +186,24 @@ export default function RulesPage() {
     }
   }
 
+  const handleAddHead = async (e) => {
+    e.preventDefault()
+    const name = newHeadName.trim()
+    if (!name) return
+    setAddBusy(true)
+    try {
+      await createMasterEntry(current, { name })
+      toast.success(`"${name}" added to ${targetLabel}`)
+      setAddOpen(false)
+      setNewHeadName('')
+      await load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setAddBusy(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -192,14 +216,64 @@ export default function RulesPage() {
         }
         actions={
           tab === 'grid' && (
-            <button onClick={load} disabled={loading} className="btn-secondary btn-sm">
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${
-                loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
-              Refresh
-            </button>
+            <div className="flex gap-2">
+              {canWrite && (
+                <button
+                  onClick={() => setAddOpen(true)}
+                  disabled={!current}
+                  className="btn-secondary btn-sm"
+                  title={`Add a new ${targetLabel.toLowerCase()}`}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  Add {targetLabel}
+                </button>
+              )}
+              <button onClick={load} disabled={loading} className="btn-secondary btn-sm">
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${
+                  loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
+                Refresh
+              </button>
+            </div>
           )
         }
       />
+
+      <Modal
+        isOpen={addOpen}
+        onClose={() => { setAddOpen(false); setNewHeadName('') }}
+        title={`Add a ${targetLabel}`}
+      >
+        <form onSubmit={handleAddHead}>
+          <label className="label">Name</label>
+          <input
+            autoFocus
+            className="input"
+            value={newHeadName}
+            onChange={(e) => setNewHeadName(e.target.value)}
+            placeholder={`e.g. ${targetLabel === 'Internal Head' ? 'Contractor' : 'IDW Civil Works'}`}
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Added blank — set its CR/DR cells below once it appears in the grid.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setAddOpen(false); setNewHeadName('') }}
+              className="btn-secondary text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={addBusy || !newHeadName.trim()}
+              className="btn-primary text-sm"
+            >
+              {addBusy && <Spinner size="sm" tone="white" className="mr-2" />}
+              Add
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Which of the three heads these rules are about. Above the tabs, not
           inside one, because it governs both: the grid and the conditions on
