@@ -7,7 +7,12 @@ export function PageHeader({ title, description, actions }) {
         <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
         {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {/* flex-wrap: a header with four or five actions used to squeeze them
+          until their labels broke over two lines. They now drop to a second
+          line as whole buttons instead, right-aligned so they sit under the
+          ones above them. Deliberately still shrinkable — pinning the width
+          would trade a broken label for a page that scrolls sideways. */}
+      {actions && <div className="toolbar sm:justify-end">{actions}</div>}
     </div>
   )
 }

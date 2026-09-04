@@ -530,46 +530,16 @@ export default function StagingPage() {
 
   return (
     <div>
+      {/* Three buttons, not five. The two that were removed from here — the
+          flagged-rows toggle and Clear highlights — change what the table
+          SHOWS rather than what it holds, so they now sit in the toolbar with
+          the filters and the search, which are the other controls that do
+          that. What is left is the three actions that touch the data, in the
+          order they are reached: reload it, check it, throw it away. */}
       <PageHeader
         title="Imported Rows"
-        description="Everything parsed out of your statements, in temp_trans. Edit a row to set its Business Unit, Head, RERA and TCP categories, or its narration."
         actions={
-          <div className="flex items-center gap-2">
-            {/* Only once a check has run, because only then is there anything
-                to narrow to. Red highlights show WHICH rows are wrong; this
-                shows only those rows, so they can be read with every column,
-                sorted and searched, instead of hunted for page by page. */}
-            {checkedAccount && (
-              <button
-                onClick={() => { setConflictsOnly((v) => !v); setPage(1) }}
-                title={conflictsOnly
-                  ? 'Show every staged row again'
-                  : `Show only the rows the last check flagged on ${checkedAccount.label}`}
-                className={`btn-sm inline-flex items-center rounded-lg border px-3 py-1.5 font-medium ${
-                  conflictsOnly
-                    ? 'border-red-300 bg-red-100 text-red-800 hover:bg-red-200'
-                    : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                }`}
-              >
-                <ShieldCheck className="h-3.5 w-3.5 mr-1" />
-                {conflictsOnly ? 'Showing flagged only' : 'Show flagged only'}
-              </button>
-            )}
-            {/* Only while something is lit. The yellow does not time out, so
-                there has to be a way to put it back that is not "reload the
-                page and hope". Counts the red rule conflicts too — one button
-                clears every colour this page paints. */}
-            {(editedIds.size > 0 || conflictIds.size > 0) && (
-              <button
-                onClick={clearHighlights}
-                title="Stop highlighting the edited and rule-conflict rows"
-                className="btn-sm inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 hover:bg-amber-100"
-              >
-                <Highlighter className="h-3.5 w-3.5 mr-1" />
-                Clear {editedIds.size + conflictIds.size} highlight
-                {editedIds.size + conflictIds.size === 1 ? '' : 's'}
-              </button>
-            )}
+          <>
             {/* The icon turns while the reload is in flight, as it already
                 does on the Ledger and Master Data — this was the one Refresh
                 in the app that gave no sign it had been pressed. */}
@@ -578,19 +548,21 @@ export default function StagingPage() {
               disabled={loading}
               className="btn-secondary btn-sm"
             >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
               {loading ? 'Refreshing' : 'Refresh'}
             </button>
-            {/* Read-only until the dialog's own Replace button, so it is not
+            {/* Solid blue: this is the one thing this page exists to be used
+                for, and it was previously indistinguishable from Refresh.
+                Read-only until the dialog's own Replace button, so it is not
                 gated on canWrite — checking is looking, and anyone who can see
                 the rows may look. */}
             <button
               onClick={() => setRulesOpen(true)}
               disabled={!summary?.staged_total}
               title="Check one account's rows against its account-type rule"
-              className="btn-secondary btn-sm"
+              className="btn-primary btn-sm"
             >
-              <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+              <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
               Check Rules
             </button>
             {canWrite && (
@@ -602,14 +574,14 @@ export default function StagingPage() {
                     ? `${summary.posted} staged row(s) are already posted — clearing is blocked`
                     : 'Remove every staged row and its batch'
                 }
-                className="btn-sm inline-flex items-center rounded-lg border border-red-200 bg-white px-3 py-1.5 font-medium text-red-600 enabled:hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn btn-sm border-red-200 bg-white text-red-600 enabled:hover:bg-red-50 enabled:hover:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                 Clear All
                 {summary?.staged_total ? ` (${summary.staged_total})` : ''}
               </button>
             )}
-          </div>
+          </>
         }
       />
 
@@ -624,73 +596,131 @@ export default function StagingPage() {
       {/* No Pending / Classified tabs. They filtered on is_classified, which
           only the Classify button ever set — with that gone the Classified tab
           could only ever show an empty table. */}
-      <div className="flex flex-wrap items-center justify-end gap-3 mb-4">
-        {/* Searched in SQL, not here. The browser only ever holds one page, so
-            filtering client-side could never find a match on any other page —
-            this looks at every staged row and pages the matches. */}
-        <div className="w-full sm:w-80">
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            onClear={() => setSearch('')}
-            placeholder="Search every column, every page..."
-          />
-          {/* Says outright that the whole table was searched, not the page.
-              Without it there is no way to tell a search that found nothing
-              from one that only looked at the fifty rows in front of you. */}
-          {query && !loading && (
-            <p className="mt-1 px-1 text-xs text-slate-500">
-              {total === 0
-                ? 'No row matches'
-                : `${total.toLocaleString('en-IN')} ${total === 1 ? 'row matches' : 'rows match'}`}
-              {' across every page'}
-              {terms.length > 1 ? ' · all words must appear' : ''}
-            </p>
-          )}
+
+      {/* One toolbar, two rows, instead of a right-aligned search floating
+          above a left-aligned filter bar with the lock buttons pushed off to
+          the far edge. Top row narrows the list, bottom row acts on whatever
+          the top row left; the divider is what says so. Both rows put what
+          reads first on the left and what is pressed last on the right. */}
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          {/* Filtered in SQL like the search, and for the same reason. The date
+              range, the account number and the company are the three things a
+              statement is looked up by, so they are buttons rather than
+              something to be typed into the search box and hoped for. */}
+          <div className="toolbar gap-3">
+            <FilterBar
+              options={filterOptions}
+              value={filters}
+              onChange={handleFilters}
+              loading={!filterOptions}
+            />
+            {activeCount(filters) > 0 && !loading && (
+              <span className="text-xs text-slate-500">
+                {total.toLocaleString('en-IN')} of{' '}
+                {(summary?.staged_total ?? 0).toLocaleString('en-IN')} staged{' '}
+                {summary?.staged_total === 1 ? 'row' : 'rows'}
+              </span>
+            )}
+          </div>
+
+          {/* Searched in SQL, not here. The browser only ever holds one page, so
+              filtering client-side could never find a match on any other page —
+              this looks at every staged row and pages the matches. */}
+          <div className="w-full lg:w-80 lg:shrink-0">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              onClear={() => setSearch('')}
+              placeholder="Search every column, every page..."
+            />
+            {/* Says outright that the whole table was searched, not the page.
+                Without it there is no way to tell a search that found nothing
+                from one that only looked at the fifty rows in front of you. */}
+            {query && !loading && (
+              <p className="mt-1 px-1 text-xs text-slate-500">
+                {total === 0
+                  ? 'No row matches'
+                  : `${total.toLocaleString('en-IN')} ${total === 1 ? 'row matches' : 'rows match'}`}
+                {' across every page'}
+                {terms.length > 1 ? ' · all words must appear' : ''}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Filtered in SQL like the search, and for the same reason. The date
-          range, the account number and the company are the three things a
-          statement is looked up by, so they are buttons rather than something
-          to be typed into the search box and hoped for. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <FilterBar
-          options={filterOptions}
-          value={filters}
-          onChange={handleFilters}
-          loading={!filterOptions}
-        />
-        {activeCount(filters) > 0 && !loading && (
-          <span className="text-xs text-slate-500">
-            {total.toLocaleString('en-IN')} of{' '}
-            {(summary?.staged_total ?? 0).toLocaleString('en-IN')} staged{' '}
-            {summary?.staged_total === 1 ? 'row' : 'rows'}
-          </span>
-        )}
+        {/* Only rendered when it would hold something, so an untouched page
+            gets a one-row toolbar rather than an empty strip and a rule. */}
+        {(checkedAccount || editedIds.size > 0 || conflictIds.size > 0 ||
+          (canWrite && total > 0)) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            {/* Only once a check has run, because only then is there anything
+                to narrow to. Red highlights show WHICH rows are wrong; this
+                shows only those rows, so they can be read with every column,
+                sorted and searched, instead of hunted for page by page.
 
-        {/* Beside the filters on purpose, not up in the header: these act on
-            whatever the filters select, and that is the control that decides
-            it. Same access as the padlock on a row — the lock guards against
-            accident, not against colleagues. */}
-        {canWrite && total > 0 && (
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={() => setBulkLock(true)}
-              disabled={loading}
-              title={`Lock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
-              className="btn-secondary btn-sm"
-            >
-              <Lock className="h-3.5 w-3.5 mr-1" /> Lock all
-            </button>
-            <button
-              onClick={() => setBulkLock(false)}
-              disabled={loading}
-              title={`Unlock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
-              className="btn-secondary btn-sm"
-            >
-              <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock all
-            </button>
+                Still red rather than blue like its neighbours: it is the same
+                red as the rows it isolates, and that match is the whole reason
+                it is legible at a glance. */}
+            {checkedAccount && (
+              <button
+                onClick={() => { setConflictsOnly((v) => !v); setPage(1) }}
+                title={conflictsOnly
+                  ? 'Show every staged row again'
+                  : `Show only the rows the last check flagged on ${checkedAccount.label}`}
+                className={`btn btn-sm ${
+                  conflictsOnly
+                    ? 'border-red-300 bg-red-100 text-red-800 hover:bg-red-200'
+                    : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                }`}
+              >
+                <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                {conflictsOnly ? 'Showing flagged only' : 'Show flagged only'}
+              </button>
+            )}
+            {/* Only while something is lit. The yellow does not time out, so
+                there has to be a way to put it back that is not "reload the
+                page and hope". Counts the red rule conflicts too — one button
+                clears every colour this page paints. */}
+            {(editedIds.size > 0 || conflictIds.size > 0) && (
+              <button
+                onClick={clearHighlights}
+                title="Stop highlighting the edited and rule-conflict rows"
+                className="btn btn-sm border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+              >
+                <Highlighter className="h-3.5 w-3.5 mr-1.5" />
+                Clear {editedIds.size + conflictIds.size} highlight
+                {editedIds.size + conflictIds.size === 1 ? '' : 's'}
+              </button>
+            )}
+
+            {/* Beside the filters on purpose, not up in the header: these act
+                on whatever the filters select, and that is the control that
+                decides it. Same access as the padlock on a row — the lock
+                guards against accident, not against colleagues. */}
+            {canWrite && total > 0 && (
+              <div className="toolbar ml-auto">
+                <span className="hidden text-xs text-slate-400 sm:inline">
+                  {total.toLocaleString('en-IN')} listed
+                </span>
+                <button
+                  onClick={() => setBulkLock(true)}
+                  disabled={loading}
+                  title={`Lock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
+                  className="btn-accent btn-sm"
+                >
+                  <Lock className="h-3.5 w-3.5 mr-1.5" /> Lock all
+                </button>
+                <button
+                  onClick={() => setBulkLock(false)}
+                  disabled={loading}
+                  title={`Unlock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
+                  className="btn-accent btn-sm"
+                >
+                  <Unlock className="h-3.5 w-3.5 mr-1.5" /> Unlock all
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -710,7 +740,7 @@ export default function StagingPage() {
           </span>
           <button
             onClick={() => { setConflictsOnly(false); setPage(1) }}
-            className="btn-sm shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-100"
+            className="btn btn-sm shrink-0 border-red-300 bg-white text-red-700 hover:bg-red-100"
           >
             Show all rows
           </button>
