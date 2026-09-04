@@ -83,6 +83,12 @@ export default function CheckRulesDialog({
   // Conflicting DR rows have two legitimate answers, so each conflict carries
   // its own choice, defaulted to the rule's preferred head.
   const [choices, setChoices] = useState({})
+  // What has happened to each row since this check ran: 'saving', 'saved', or
+  // an error string. Picking a head from a dropdown writes it immediately —
+  // choosing by hand IS the decision, and making someone press a second button
+  // to confirm a choice they already made is a step that only exists to be
+  // forgotten. The bulk button below is for the rows nobody touched.
+  const [rowState, setRowState] = useState({})
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
 
@@ -111,6 +117,7 @@ export default function CheckRulesDialog({
   useEffect(() => {
     if (!isOpen) return
     setType(''); setAccount(''); setResult(null); setChoices({}); setError('')
+    setRowState({})
     let cancelled = false
     setLoadingLists(true)
     Promise.all([
@@ -154,12 +161,18 @@ export default function CheckRulesDialog({
   )
 
   const conflicts = (result?.rows || []).filter((r) => r.status === 'conflict')
-  const actionable = conflicts.filter((r) => !r.is_locked)
+  // Rows the bulk button still has work to do on: unlocked, and not already
+  // written by hand. A row saved from its own dropdown is done, and counting it
+  // again would have the button offer to redo a decision already made.
+  const actionable = conflicts.filter(
+    (r) => !r.is_locked && rowState[r.id]?.status !== 'saved')
 
   // In the fieldmap's order, not the order they were ticked — the extra
   // columns should read like the staging table, which is where the user knows
   // them from.
   const extraColumns = (result?.columns || []).filter((c) => shown.includes(c.name))
+
+  const saved = conflicts.filter((r) => rowState[r.id]?.status === 'saved').length
 
   const toggleColumn = (name) => {
     setShown((prev) => {
@@ -177,6 +190,47 @@ export default function CheckRulesDialog({
       }
       return next
     })
+  }
+
+  // One row, written the moment its dropdown changes.
+  //
+  // Goes through the same /check-rules/apply the bulk button uses, so the head
+  // is re-checked against what the rule allows for THIS row — the endpoint is
+  // not a bulk editor wearing a rule's name, and sending one row must not be
+  // the way around that.
+  const handlePick = async (row, headId) => {
+    setChoices((prev) => ({ ...prev, [row.id]: headId }))
+    setRowState((prev) => ({ ...prev, [row.id]: { status: 'saving' } }))
+    try {
+      const res = await applyTempRules({
+        account_type: type,
+        account_number: account,
+        rows: [{ id: row.id, head_id: Number(headId) }],
+      })
+      if (res.updated === 1) {
+        setRowState((prev) => ({ ...prev, [row.id]: { status: 'saved' } }))
+        // The table behind loses this row's red and gains its amber. Not
+        // onClose: the point of saving here is to keep working down the list.
+        onApplied?.(res.updated_ids)
+      } else {
+        // Applied nothing and did not throw: the row is locked, or it no
+        // longer matches the account or this user's scope. Said on the row
+        // rather than as a toast, because it is about that row.
+        setRowState((prev) => ({
+          ...prev,
+          [row.id]: {
+            status: 'error',
+            message: res.skipped_locked
+              ? 'Locked — unlock it first'
+              : 'No longer matches this account',
+          },
+        }))
+      }
+    } catch (err) {
+      setRowState((prev) => ({
+        ...prev, [row.id]: { status: 'error', message: err.message },
+      }))
+    }
   }
 
   const handleCheck = async () => {
@@ -202,6 +256,7 @@ export default function CheckRulesDialog({
         defaults[r.id] = allowedFor(data, r)[0]?.id
       })
       setChoices(defaults)
+      setRowState({})
       // Paint the conflicting rows red on the table behind this dialog, so
       // closing it without fixing anything still leaves the findings visible.
       // The field the rule judged goes with them: fixing a red row through
@@ -494,10 +549,22 @@ export default function CheckRulesDialog({
                     <tbody className="divide-y divide-red-100">
                       {conflicts.map((r) => {
                         const allowed = allowedFor(result, r)
+                        const state = rowState[r.id]
                         const cond = r.rule_id != null
                           && result.conditions?.[String(r.rule_id)]
                         return (
-                          <tr key={r.id} className={`bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`}>
+                          // Green once written: the row is no longer a finding,
+                          // it is a thing that has been dealt with, and leaving
+                          // it red would have the list keep accusing rows the
+                          // user has already fixed.
+                          <tr
+                            key={r.id}
+                            className={
+                              state?.status === 'saved'
+                                ? 'bg-green-50'
+                                : `bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`
+                            }
+                          >
                             <td className="px-3 py-2 whitespace-nowrap">{r.txn_date || '—'}</td>
                             <td className="px-3 py-2 text-right font-mono whitespace-nowrap">{fmtAmount(r.amount)}</td>
                             <td className="px-3 py-2 font-mono">{r.direction}</td>
@@ -542,18 +609,33 @@ export default function CheckRulesDialog({
                               ) : allowed.length > 1 ? (
                                 // Debits have two legitimate answers, so each
                                 // row decides for itself; the rule's first
-                                // choice is preselected.
-                                <select
-                                  className="input py-1 text-xs"
-                                  value={choices[r.id] ?? ''}
-                                  onChange={(e) => setChoices((prev) => ({
-                                    ...prev, [r.id]: Number(e.target.value),
-                                  }))}
-                                >
-                                  {allowed.map((h) => (
-                                    <option key={h.id} value={h.id}>{h.name}</option>
-                                  ))}
-                                </select>
+                                // choice is preselected. Choosing writes it.
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    className="input py-1 text-xs"
+                                    value={choices[r.id] ?? ''}
+                                    disabled={state?.status === 'saving'}
+                                    onChange={(e) => handlePick(r, e.target.value)}
+                                  >
+                                    {allowed.map((h) => (
+                                      <option key={h.id} value={h.id}>{h.name}</option>
+                                    ))}
+                                  </select>
+                                  {state?.status === 'saving' && <Spinner size="sm" />}
+                                  {state?.status === 'saved' && (
+                                    <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
+                                      <Check className="h-3.5 w-3.5 mr-0.5" /> saved
+                                    </span>
+                                  )}
+                                  {state?.status === 'error' && (
+                                    <span
+                                      className="shrink-0 text-xs font-medium text-red-700"
+                                      title={state.message}
+                                    >
+                                      not saved
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-green-700">{allowed[0]?.name}</span>
                               )}
@@ -570,22 +652,25 @@ export default function CheckRulesDialog({
                   already follow the rule
                   {result.summary.no_direction > 0 &&
                     `, ${result.summary.no_direction} without a CR/DR marker skipped`}
+                  {saved > 0 &&
+                    `. ${saved} ${saved === 1 ? 'row' : 'rows'} saved from the dropdowns above`}
                   .
                 </p>
               </>
             )}
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button onClick={onClose} className="btn-secondary text-sm">
-                No change
-              </button>
-              {canWrite && result.summary.conflicts > 0 && (
+            {/* Only when there is something to press. With nothing to replace
+                — every row already following the rule, or every one saved from
+                its own dropdown — this dialog is finished, and the way out of a
+                finished dialog is the X, not a button that does nothing. */}
+            {canWrite && result.summary.conflicts > 0 && (
+              <div className="flex justify-end gap-3 pt-2">
                 <button
                   onClick={handleApply}
                   disabled={applying || actionable.length === 0}
                   title={actionable.length === 0
-                    ? 'Every conflicting row is locked — unlock them first'
-                    : undefined}
+                    ? 'Nothing left to replace — every conflicting row is either saved or locked'
+                    : 'Apply the rule to the rows still untouched'}
                   className="btn-primary text-sm"
                 >
                   {applying && <Spinner size="sm" tone="white" className="mr-2" />}
@@ -593,8 +678,8 @@ export default function CheckRulesDialog({
                     ? 'Replacing...'
                     : `Replace heads according to rule (${actionable.length})`}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>

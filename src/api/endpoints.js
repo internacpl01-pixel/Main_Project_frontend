@@ -370,6 +370,17 @@ export async function setTempRowLock(rowId, locked) {
   return data
 }
 
+// The same, for every row the current filters select — all pages of them, not
+// just the one on screen. `params` is the very object the list is fetched with,
+// so the button and the table cannot disagree about which rows "all" means.
+// Returns { matched, changed }: they differ when some rows were already in the
+// state asked for.
+export async function setAllTempRowsLock(locked, params = {}) {
+  const { data } = await api.post(
+    '/transactions/temp-trans/lock-all', { locked }, { params })
+  return data
+}
+
 export async function classifyRow(rowId, payload) {
   const { data } = await api.post(`/transactions/temp-trans/${rowId}/classify`, payload)
   return data

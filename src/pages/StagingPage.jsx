@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
+  setAllTempRowsLock,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -142,6 +143,12 @@ export default function StagingPage() {
   const [checkedAccount, setCheckedAccount] = useState(null)
   const [conflictsOnly, setConflictsOnly] = useState(false)
 
+  // Lock or unlock everything the filters select. `true` or `false` while the
+  // confirmation is open, null when it is not — one piece of state, because the
+  // two buttons ask the same question about opposite states.
+  const [bulkLock, setBulkLock] = useState(null)
+  const [bulkLockBusy, setBulkLockBusy] = useState(false)
+
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
   useEffect(() => {
@@ -175,16 +182,25 @@ export default function StagingPage() {
     return () => { cancelled = true }
   }, [])
 
+  // What the table is currently looking at, without paging or ordering. Shared
+  // with Lock all / Unlock all so "all" is the same set the list is showing —
+  // a bulk action with its own idea of the filters would sooner or later act on
+  // rows that were never on screen.
+  const listParams = useCallback(() => {
+    const p = { ...filterParams(filters) }
+    if (query.trim()) p.search = query.trim()
+    if (conflictsOnly && checkedAccount) {
+      p.rule_conflicts =
+        `${checkedAccount.account_type}:${checkedAccount.account_number}`
+    }
+    return p
+  }, [filters, query, conflictsOnly, checkedAccount])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = { page, limit, ...filterParams(filters) }
-      if (query.trim()) params.search = query.trim()
+      const params = { page, limit, ...listParams() }
       if (sort) { params.sort = sort; params.dir = dir }
-      if (conflictsOnly && checkedAccount) {
-        params.rule_conflicts =
-          `${checkedAccount.account_type}:${checkedAccount.account_number}`
-      }
       // The server decides the column set — it is read from the live
       // temp_trans table with names from the fieldmap, so a custom field shows
       // up here the moment it is created, with no change needed on this page.
@@ -209,7 +225,7 @@ export default function StagingPage() {
     } finally {
       setLoading(false)
     }
-  }, [query, page, limit, sort, dir, filters, conflictsOnly, checkedAccount])
+  }, [page, limit, sort, dir, listParams])
 
   useEffect(() => { load() }, [load])
 
@@ -251,6 +267,38 @@ export default function StagingPage() {
       flashRow.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }
   }, [lastEdited, rows])
+
+  // Whether "all" means less than everything staged. Drives the wording of the
+  // confirmation, because "lock 3 rows" and "lock 3 of 2,400 rows" are
+  // different decisions and the dialog has to say which one is being made.
+  const narrowed = activeCount(filters) > 0 || Boolean(query.trim()) ||
+                   (conflictsOnly && Boolean(checkedAccount))
+
+  const handleBulkLock = async () => {
+    const locking = bulkLock
+    setBulkLockBusy(true)
+    try {
+      const res = await setAllTempRowsLock(locking, listParams())
+      setBulkLock(null)
+      await load()
+      toast.success(
+        res.changed === 0
+          ? `Nothing to do — all ${res.matched.toLocaleString('en-IN')} ` +
+            `${res.matched === 1 ? 'row was' : 'rows were'} already ` +
+            `${locking ? 'locked' : 'unlocked'}.`
+          : `${res.changed.toLocaleString('en-IN')} ` +
+            `${res.changed === 1 ? 'row' : 'rows'} ` +
+            `${locking ? 'locked' : 'unlocked'}` +
+            (res.changed < res.matched
+              ? ` — the other ${(res.matched - res.changed).toLocaleString('en-IN')} already ${locking ? 'were' : 'was not'}.`
+              : '.')
+      )
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBulkLockBusy(false)
+    }
+  }
 
   const clearHighlights = () => {
     setEditedIds(new Set()); setLastEdited(null); setConflictIds(new Set())
@@ -619,6 +667,31 @@ export default function StagingPage() {
             {(summary?.staged_total ?? 0).toLocaleString('en-IN')} staged{' '}
             {summary?.staged_total === 1 ? 'row' : 'rows'}
           </span>
+        )}
+
+        {/* Beside the filters on purpose, not up in the header: these act on
+            whatever the filters select, and that is the control that decides
+            it. Same access as the padlock on a row — the lock guards against
+            accident, not against colleagues. */}
+        {canWrite && total > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setBulkLock(true)}
+              disabled={loading}
+              title={`Lock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
+              className="btn-secondary btn-sm"
+            >
+              <Lock className="h-3.5 w-3.5 mr-1" /> Lock all
+            </button>
+            <button
+              onClick={() => setBulkLock(false)}
+              disabled={loading}
+              title={`Unlock the ${total.toLocaleString('en-IN')} row${total === 1 ? '' : 's'} currently listed`}
+              className="btn-secondary btn-sm"
+            >
+              <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock all
+            </button>
+          </div>
         )}
       </div>
 
@@ -995,6 +1068,30 @@ export default function StagingPage() {
           })
           await load()
         }}
+      />
+
+      <ConfirmDialog
+        isOpen={bulkLock !== null}
+        onClose={() => setBulkLock(null)}
+        onConfirm={handleBulkLock}
+        title={bulkLock ? 'Lock rows' : 'Unlock rows'}
+        message={
+          `${bulkLock ? 'Lock' : 'Unlock'} ${total.toLocaleString('en-IN')} ` +
+          `${total === 1 ? 'row' : 'rows'}` +
+          (narrowed
+            ? ' — the ones the current filters are showing, not every staged row.'
+            : ' — every row in staging.') +
+          (bulkLock
+            ? ' A locked row refuses edits and deletes until it is unlocked, and Clear All is blocked while any row is locked.'
+            : ' Unlocked rows can be edited and deleted again.') +
+          ' Reversible either way.'
+        }
+        confirmText={
+          bulkLockBusy
+            ? (bulkLock ? 'Locking...' : 'Unlocking...')
+            : (bulkLock ? 'Lock them' : 'Unlock them')
+        }
+        busy={bulkLockBusy}
       />
 
       <ConfirmDialog
