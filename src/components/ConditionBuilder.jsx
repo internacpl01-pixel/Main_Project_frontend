@@ -135,7 +135,12 @@ export default function ConditionBuilder({
     setPreviewing(true); setError('')
     try {
       const { head_ids, is_active, ...test } = payload()
-      setPreview(await previewCondition(test))
+      // The head type goes even though the preview asks only the IF half: it
+      // decides which head the examples show as the row's current one, and
+      // showing the RERA head beside an Internal Head condition would be
+      // showing the column this sentence is not about.
+      setPreview(await previewCondition(
+        { ...test, target: options?.target?.target }))
     } catch (err) {
       setError(err.message); setPreview(null)
     } finally {

@@ -20,9 +20,19 @@ import { RefreshCw, ShieldCheck, ScrollText, ArrowRight } from 'lucide-react'
 // wrong and to fill its Replace dropdown, so a head left blank for a type is
 // never offered there and never accepted there.
 //
-// Neither axis is written down here. The rows come from the RERA Head master
-// and the columns from the Type of Account master, both read live, so adding
-// either on the Master Data page changes this grid with nothing to deploy.
+// Neither axis is written down here. The rows come from one of the three head
+// masters and the columns from the Type of Account master, both read live, so
+// adding either on the Master Data page changes this grid with nothing to
+// deploy.
+//
+// There are THREE grids, not one. A staged row carries an Internal Head, a RERA
+// Head and a TCP Head, each written by its own dropdown into its own column, and
+// each has its own rules. The switch at the top of the page chooses which one is
+// being edited; the list of them comes from the server, so this file never names
+// a master. One grid at a time because the three masters hold 97, 22 and 17
+// heads — a combined table would be 136 rows deep, and two heads with the same
+// name in different masters would be two rows nothing on screen could tell
+// apart.
 
 // A blank cell is the absence of a rule, so the empty option carries no value
 // and clearing sends null. The rest are the server's own list.
@@ -46,6 +56,14 @@ export default function RulesPage() {
   // panel is unmounted. Reported by the panel each time it loads.
   const [conditionCount, setConditionCount] = useState(0)
 
+  // Which head master is being edited. Left undefined on the first load so the
+  // server picks its own default — the page should not have to know which of
+  // the three that is.
+  const [target, setTarget] = useState(null)
+  // Its own state rather than read off `matrix`, because switching clears the
+  // matrix and the switch itself must not vanish while the new grid loads.
+  const [targets, setTargets] = useState([])
+
   const [matrix, setMatrix] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -57,7 +75,12 @@ export default function RulesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setMatrix(await fetchRuleMatrix())
+      const next = await fetchRuleMatrix(target || undefined)
+      setMatrix(next)
+      if (next.targets?.length) setTargets(next.targets)
+      // Adopt whatever the server resolved, so every later call — including the
+      // conditions panel's — names the same head type this grid is showing.
+      setTarget(next.target?.target || null)
       setError('')
     } catch (err) {
       setError(err.message)
@@ -65,13 +88,35 @@ export default function RulesPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+    // `target` deliberately out of the deps: switching head type goes through
+    // handleTarget, which clears the grid first so the old cells cannot be
+    // painted against the new head list for a frame.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target])
 
   useEffect(() => { load() }, [load])
+
+  // The heads change with the head type, and `cells` is keyed by head id — so
+  // the old grid must go before the new one arrives, or a moment of the wrong
+  // master's cells is painted against this one's rows. Search goes too: "find a
+  // head" typed against 97 Internal Heads means nothing among 22 RERA ones.
+  const handleTarget = (next) => {
+    if (next === target) return
+    setMatrix(null)
+    setSearch('')
+    setTarget(next)
+  }
 
   const heads = matrix?.heads || []
   const types = matrix?.account_types || []
   const cells = matrix?.cells || {}
+
+  // `target` while a switch is in flight, so the pressed button lights up at
+  // once instead of after the round trip.
+  const current = target || matrix?.target?.target || null
+  const targetLabel = targets.find((t) => t.target === current)?.label
+    || matrix?.target?.label || 'Head'
+  const unusable = targets.filter((t) => !t.used)
 
   const needle = search.trim().toLowerCase()
   const shown = useMemo(
@@ -118,7 +163,8 @@ export default function RulesPage() {
     })
     setBusyCell(key)
     try {
-      await setRuleCell(head.id, type, value === BLANK ? null : value)
+      await setRuleCell(head.id, type, value === BLANK ? null : value,
+                        matrix?.target?.target)
     } catch (err) {
       toast.error(err.message)
       setMatrix((m) => {
@@ -147,13 +193,56 @@ export default function RulesPage() {
         actions={
           tab === 'grid' && (
             <button onClick={load} disabled={loading} className="btn-secondary btn-sm">
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${
                 loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
               Refresh
             </button>
           )
         }
       />
+
+      {/* Which of the three heads these rules are about. Above the tabs, not
+          inside one, because it governs both: the grid and the conditions on
+          screen are always the same head type, and a switch that moved only one
+          of them would be the surest way to write a condition against a grid it
+          has nothing to do with.
+
+          The list is the server's. A head type this company has not mapped on
+          its Field Mapping page is still shown but disabled — hiding it would
+          leave no way to find out why it is missing. */}
+      {targets.length > 1 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">Rules for</span>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {targets.map((t) => (
+              <button
+                key={t.target}
+                onClick={() => t.used && handleTarget(t.target)}
+                disabled={!t.used}
+                title={t.used
+                  ? `Rules about the ${t.label} on a staged row`
+                  : `This company has no column mapped to ${t.label}, so a rule `
+                    + `about it could never be applied. Map one on Field Mapping.`}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  !t.used
+                    ? 'cursor-not-allowed text-slate-300'
+                    : t.target === current
+                      ? 'bg-white text-primary-700 shadow-sm ring-1 ring-slate-200 cursor-pointer'
+                      : 'text-slate-600 hover:text-slate-900 cursor-pointer'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {unusable.length > 0 && (
+            <Link to="/field-mapping" className="text-xs text-slate-400 hover:text-slate-600 underline">
+              {unusable.map((t) => t.label).join(' and ')}{' '}
+              {unusable.length === 1 ? 'is' : 'are'} not mapped
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Two halves of one rule, so two tabs rather than one long page: with 22
           heads the grid is already taller than a screen, and a conditions list
@@ -181,21 +270,31 @@ export default function RulesPage() {
       </div>
 
       {tab === 'conditions' ? (
-        <ConditionsPanel canWrite={canWrite} onCountChange={setConditionCount} />
+        <ConditionsPanel
+          canWrite={canWrite}
+          target={current}
+          targetLabel={targetLabel}
+          onCountChange={setConditionCount}
+        />
       ) : (
       <>
-      {/* What the grid means, in one line, with the example that explains the
-          whole shape of it. */}
+      {/* What a cell means, in one line. Said about the head type on screen and
+          about the directions themselves rather than about a named head: the
+          grid used to illustrate itself with "Master 2 RERA", which is a row of
+          the RERA master and reads as nonsense above the Internal Head one. */}
       <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
           <ScrollText className="h-4 w-4 shrink-0 text-slate-400" />
-          <span className="font-medium text-slate-800">Master 2 RERA</span>
-          <ArrowRight className="h-3.5 w-3.5 text-slate-300" />
-          <span>money leaves the Master account, so</span>
-          <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700">DR</span>
-          <span>under MASTER, and arrives in the RERA account, so</span>
+          <span>A</span>
           <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">CR</span>
-          <span>under RERA. Left blank everywhere else, so it is never offered there.</span>
+          <span>cell says this {targetLabel.toLowerCase()} is what money</span>
+          <span className="font-medium text-slate-800">arriving in</span>
+          <span>that kind of account is recorded as;</span>
+          <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700">DR</span>
+          <span>says the same for money</span>
+          <span className="font-medium text-slate-800">leaving</span>
+          <ArrowRight className="h-3.5 w-3.5 text-slate-300" />
+          <span>a blank cell is no rule at all, so it is never flagged and never offered.</span>
         </p>
       </div>
 
@@ -211,7 +310,7 @@ export default function RulesPage() {
             value={search}
             onChange={setSearch}
             onClear={() => setSearch('')}
-            placeholder="Find a head..."
+            placeholder={`Find a ${targetLabel.toLowerCase()}...`}
           />
         </div>
         {!loading && matrix && (
@@ -229,10 +328,12 @@ export default function RulesPage() {
         {!loading && matrix && (heads.length === 0 || types.length === 0) ? (
           <EmptyState
             icon={<ShieldCheck className="h-10 w-10" />}
-            title={heads.length === 0 ? 'No heads yet' : 'No account types yet'}
+            title={heads.length === 0
+              ? `No ${targetLabel} entries yet`
+              : 'No account types yet'}
             description={
               heads.length === 0
-                ? `Add entries under Master Data → ${matrix.target?.label || 'RERA Head'}, and they appear here as rows.`
+                ? `Add entries under Master Data → ${targetLabel}, and they appear here as rows.`
                 : 'Add entries under Master Data → Type of Account, and they appear here as columns.'
             }
             action={
@@ -247,7 +348,7 @@ export default function RulesPage() {
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50/50">
                     <th className="sticky left-0 z-10 bg-slate-50 px-6 py-3 text-left text-xs font-medium tracking-wide text-slate-500">
-                      {matrix?.target?.label || 'Head'}
+                      {targetLabel}
                     </th>
                     {types.map((t) => (
                       <th key={t} className="px-4 py-3 text-center text-xs font-medium tracking-wide text-slate-500">

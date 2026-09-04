@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import { Modal, Spinner } from './UI.jsx'
 import {
   fetchMasterData, fetchTempImportFilters, checkTempRules, applyTempRules,
-  fetchRuleSummary,
+  fetchRuleSummary, fetchRuleTargets,
 } from '../api/endpoints.js'
 
 // The Check Rules flow: pick an account type, pick one of that type's
@@ -77,6 +77,13 @@ export default function CheckRulesDialog({
 
   const [type, setType] = useState('')
   const [account, setAccount] = useState('')
+  // Which of the three heads this run judges. A row carries all three and each
+  // has its own rules, so one run decides one column — checking all three at
+  // once would report a row as wrong three ways with no way to say which
+  // dropdown to change. Defaults to whatever the server calls its default, so
+  // this file never names a master.
+  const [targets, setTargets] = useState([])
+  const [target, setTarget] = useState('')
 
   const [checking, setChecking] = useState(false)
   const [result, setResult] = useState(null)
@@ -123,16 +130,38 @@ export default function CheckRulesDialog({
     Promise.all([
       fetchMasterData('account_type').catch(() => []),
       fetchTempImportFilters().catch(() => null),
-      // Not fatal: without it the dropdown simply stops annotating itself.
-      fetchRuleSummary().catch(() => ({})),
-    ]).then(([typeRows, filters, counts]) => {
+      fetchRuleTargets().catch(() => null),
+    ]).then(([typeRows, filters, targetList]) => {
       if (cancelled) return
       setTypes((Array.isArray(typeRows) ? typeRows : []).map((t) => t.name))
       setAccounts(filters?.account?.values || [])
-      setRuleCounts(counts || {})
+      const list = targetList?.targets || []
+      setTargets(list)
+      // The server's default when this company can use it; otherwise the first
+      // it can. A head type with no column mapped is one whose answer could
+      // never be saved, so opening on it would be opening on a dead end.
+      const usable = list.filter((t) => t.used)
+      setTarget(
+        usable.find((t) => t.target === targetList?.default)?.target
+        || usable[0]?.target || targetList?.default || '')
     }).finally(() => { if (!cancelled) setLoadingLists(false) })
     return () => { cancelled = true }
   }, [isOpen])
+
+  // The rule counts on the account-type dropdown are per head type, so they are
+  // read again whenever it changes. Its own effect rather than part of the open
+  // above: four MASTER rules on the RERA grid say nothing about whether an
+  // Internal Head run would find anything, and showing last head type's numbers
+  // is worse than showing none.
+  useEffect(() => {
+    if (!isOpen || !target) return
+    let cancelled = false
+    // Not fatal: without it the dropdown simply stops annotating itself.
+    fetchRuleSummary(target).catch(() => ({})).then((counts) => {
+      if (!cancelled) setRuleCounts(counts || {})
+    })
+    return () => { cancelled = true }
+  }, [isOpen, target])
 
   // Only accounts the Bank master types as the chosen kind, and only ones
   // with staged rows — the filter feed is already exactly that intersection.
@@ -205,6 +234,10 @@ export default function CheckRulesDialog({
       const res = await applyTempRules({
         account_type: type,
         account_number: account,
+        // The head type the check ran on, not the dropdown's current value:
+        // they are the same until someone changes it, and if they differ this
+        // would write a column nothing judged.
+        target: result.target.target,
         rows: [{ id: row.id, head_id: Number(headId) }],
       })
       if (res.updated === 1) {
@@ -237,7 +270,7 @@ export default function CheckRulesDialog({
     setChecking(true); setError(''); setResult(null)
     try {
       const data = await checkTempRules({
-        account_type: type, account_number: account,
+        account_type: type, account_number: account, target,
       })
       setResult(data)
 
@@ -269,7 +302,8 @@ export default function CheckRulesDialog({
       onChecked?.(
         new Set(data.rows.filter((r) => r.status === 'conflict').map((r) => r.id)),
         data.target.field,
-        { account_type: type, account_number: account, label: data.account.label },
+        { account_type: type, account_number: account,
+          target: data.target.target, label: data.account.label },
       )
     } catch (err) {
       setError(err.message)
@@ -284,6 +318,7 @@ export default function CheckRulesDialog({
       const res = await applyTempRules({
         account_type: type,
         account_number: account,
+        target: result.target.target,
         rows: actionable.map((r) => ({
           id: r.id, head_id: Number(choices[r.id]),
         })),
@@ -307,9 +342,39 @@ export default function CheckRulesDialog({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="2xl">
       <div className="space-y-4">
-        {/* Step 1: which rule, which account. Changing either invalidates the
-            check below it, so both resets clear the result. */}
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* Step 1: which head, which rule, which account. Changing any of the
+            three invalidates the check below it, so all three resets clear the
+            result. */}
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label className="label flex items-center gap-2">
+              Head to check
+              {loadingLists && <Spinner size="sm" />}
+            </label>
+            <select
+              className="input"
+              value={target}
+              disabled={loadingLists || targets.length === 0}
+              onChange={(e) => {
+                setTarget(e.target.value)
+                // Not the account: it is chosen by its Bank master type, which
+                // this does not touch. The result goes, because it judged a
+                // different column.
+                setResult(null); setChoices({}); setRowState({}); setError('')
+              }}
+            >
+              {targets.map((t) => (
+                <option key={t.target} value={t.target} disabled={!t.used}>
+                  {t.label}
+                  {t.used ? '' : ' · no column mapped'}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-400">
+              A row carries three heads and each has its own rules. One run
+              judges one of them.
+            </p>
+          </div>
           <div>
             <label className="label flex items-center gap-2">
               Account type
@@ -401,7 +466,7 @@ export default function CheckRulesDialog({
         <div>
           <button
             onClick={handleCheck}
-            disabled={!type || !account || checking}
+            disabled={!type || !account || !target || checking}
             className="btn-primary text-sm inline-flex items-center"
           >
             {checking

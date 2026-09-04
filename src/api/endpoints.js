@@ -411,29 +411,50 @@ export async function applyTempRules(payload) {
 // ── Rules ────────────────────────────────────────────────────────────────────
 // The grid behind Check Rules: which heads are valid for which account type,
 // and in which direction. Both axes are live reads on the server — the heads
-// from the RERA Head master, the account types from the Type of Account master
-// — so nothing here or on the page names either.
+// from one of the three head masters, the account types from the Type of Account
+// master — so nothing here or on the page names either.
+//
+// `target` is which head master: 'head' (Internal Head), 'rera_head' or
+// 'idw_head' (TCP Head). A staged row carries all three, each with its own
+// grid and its own conditions, and every call below is about exactly one of
+// them. Left out, it means 'rera_head' — the only kind of rule that existed
+// before, so an old call keeps its old meaning.
 
-export async function fetchRuleMatrix() {
-  // { heads, account_types, directions, cells: {headId: {TYPE: 'CR'|'DR'}}, target }
+// { targets: [{target, label, used, selected}], default } — the three head types
+// and whether this company has a column mapped for each. Separate from
+// /rules/matrix because the Check Rules dialog wants only this and that one
+// carries a whole grid.
+export async function fetchRuleTargets() {
+  const { data } = await api.get('/rules/targets')
+  return data
+}
+
+export async function fetchRuleMatrix(target) {
+  // { heads, account_types, directions, cells: {headId: {TYPE: 'CR'|'DR'}},
+  //   target, targets }
   // A head/type pair with no entry in `cells` has no rule and is not offered.
-  const { data } = await api.get('/rules/matrix')
+  const { data } = await api.get('/rules/matrix', { params: { target } })
   return data
 }
 
 // One cell. `direction` null clears it — there is no "blank" value to store,
-// because no rule and a rule saying nothing are the same state.
-export async function setRuleCell(headId, accountType, direction) {
+// because no rule and a rule saying nothing are the same state. `target` says
+// which master headId is a row of; the server looks it up there and refuses an
+// id that belongs to a different one.
+export async function setRuleCell(headId, accountType, direction, target) {
   const { data } = await api.put('/rules/cell', {
     head_id: headId, account_type: accountType, direction: direction || null,
+    target,
   })
   return data
 }
 
 // { TYPE: {cr, dr, total} } — how many heads each account type accepts. Used to
 // say whether a type has a rule at all before anyone runs a check against it.
-export async function fetchRuleSummary() {
-  const { data } = await api.get('/rules/summary')
+// Counted per head type: four MASTER rules on the RERA grid say nothing about
+// whether an Internal Head check would find anything.
+export async function fetchRuleSummary(target) {
+  const { data } = await api.get('/rules/summary', { params: { target } })
   return data
 }
 
@@ -446,14 +467,15 @@ export async function fetchRuleSummary() {
 // the columns, operators, heads and account types its dropdowns are filled from.
 // The operator list in particular is the server's, never a copy in the browser,
 // so the page cannot offer a test the check does not implement.
-export async function fetchConditions() {
-  const { data } = await api.get('/rules/conditions')
+export async function fetchConditions(target) {
+  const { data } = await api.get('/rules/conditions', { params: { target } })
   return data
 }
 
 // `payload` is {account_type, direction, subject_field, operator, value1,
-// value2, head_ids, is_active}. head_ids is ordered: the first is what the
-// Replace dropdown preselects.
+// value2, head_ids, target, is_active}. head_ids is ordered: the first is what
+// the Replace dropdown preselects, and every one of them must be a row of
+// `target`'s master — the database refuses the mix, not just the API.
 export async function createCondition(payload) {
   const { data } = await api.post('/rules/conditions', payload)
   return data
@@ -471,9 +493,9 @@ export async function deleteCondition(id) {
 
 // The whole group in the order it should decide, not "move this one up", so the
 // result cannot depend on what this tab thought the old order was.
-export async function reorderConditions(accountType, direction, ids) {
+export async function reorderConditions(accountType, direction, ids, target) {
   const { data } = await api.post('/rules/conditions/reorder', {
-    account_type: accountType, direction, ids,
+    account_type: accountType, direction, ids, target,
   })
   return data
 }

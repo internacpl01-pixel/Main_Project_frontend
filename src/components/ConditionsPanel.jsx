@@ -21,8 +21,16 @@ import {
 // The sentence itself is written by the server (rules.describe) and rendered
 // here as text. It is deliberately not assembled in the browser — a sentence
 // built twice is a sentence that can disagree with the rule that runs.
+//
+// `target` is the head type the Rules page is showing, and it is passed in
+// rather than chosen here so the conditions on screen are always about the same
+// master as the grid behind the other tab. Every read and every write below
+// carries it: a condition names heads from one master only, and the database
+// refuses a mix.
 
-export default function ConditionsPanel({ canWrite, onCountChange }) {
+export default function ConditionsPanel({
+  canWrite, target, targetLabel, onCountChange,
+}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -35,7 +43,7 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await fetchConditions()
+      const d = await fetchConditions(target || undefined)
       setData(d)
       setError('')
       onCountChange?.(d.conditions.length)
@@ -45,7 +53,7 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
     } finally {
       setLoading(false)
     }
-  }, [onCountChange])
+  }, [onCountChange, target])
 
   useEffect(() => { load() }, [load])
 
@@ -68,11 +76,16 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
     return out
   }, [conditions])
 
+  // The head type rides on every write, taken from what this panel is showing
+  // rather than from the builder — the builder's head list came from here, so
+  // this is the one place that knows which master those ids belong to.
+  const withTarget = (payload) => ({ ...payload, target: data?.target?.target })
+
   const handleSave = async (payload) => {
     setSaving(true)
     try {
-      if (editing) await updateCondition(editing.id, payload)
-      else await createCondition(payload)
+      if (editing) await updateCondition(editing.id, withTarget(payload))
+      else await createCondition(withTarget(payload))
       setBuilderOpen(false)
       setEditing(null)
       await load()
@@ -102,7 +115,7 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
   const toggleActive = async (c) => {
     setBusyId(c.id)
     try {
-      await updateCondition(c.id, {
+      await updateCondition(c.id, withTarget({
         account_type: c.account_type,
         direction: c.direction,
         subject_field: c.subject_field,
@@ -111,7 +124,7 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
         value2: c.value2,
         head_ids: (c.heads || []).map((h) => h.id),
         is_active: !c.is_active,
-      })
+      }))
       await load()
     } catch (err) {
       toast.error(err.message)
@@ -122,13 +135,17 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
 
   const move = async (group, index, delta) => {
     const next = [...group.rows]
-    const target = index + delta
-    if (target < 0 || target >= next.length) return
-    ;[next[index], next[target]] = [next[target], next[index]]
+    // `swapWith`, not `target` — that word now means the head type everywhere
+    // else in this file, and two meanings one scope apart is how a wrong one
+    // gets sent.
+    const swapWith = index + delta
+    if (swapWith < 0 || swapWith >= next.length) return
+    ;[next[index], next[swapWith]] = [next[swapWith], next[index]]
     setBusyId(group.rows[index].id)
     try {
       await reorderConditions(
-        group.account_type, group.direction, next.map((c) => c.id))
+        group.account_type, group.direction, next.map((c) => c.id),
+        data?.target?.target)
       await load()
     } catch (err) {
       toast.error(err.message)
@@ -145,6 +162,13 @@ export default function ConditionsPanel({ canWrite, onCountChange }) {
           matches it, its heads are the only answer. Rows no condition describes
           fall back to the grid. Where two conditions could both match, the
           higher one decides.
+          {targetLabel && (
+            <>
+              {' '}These are the{' '}
+              <span className="font-medium text-slate-800">{targetLabel}</span>{' '}
+              conditions — switch the head type above to see the others.
+            </>
+          )}
         </p>
         {canWrite && (
           <button

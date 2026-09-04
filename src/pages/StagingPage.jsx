@@ -190,8 +190,14 @@ export default function StagingPage() {
     const p = { ...filterParams(filters) }
     if (query.trim()) p.search = query.trim()
     if (conflictsOnly && checkedAccount) {
-      p.rule_conflicts =
-        `${checkedAccount.account_type}:${checkedAccount.account_number}`
+      // Three parts, not two: the head type decides which column is judged, and
+      // a filter that re-judged the RERA head while the check had run on the
+      // Internal one would flag a different set of rows than the dialog showed.
+      p.rule_conflicts = [
+        checkedAccount.account_type,
+        checkedAccount.account_number,
+        checkedAccount.target,
+      ].filter(Boolean).join(':')
     }
     return p
   }, [filters, query, conflictsOnly, checkedAccount])
