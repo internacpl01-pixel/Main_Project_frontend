@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchRuleMatrix, setRuleCell, createMasterEntry } from '../api/endpoints.js'
-import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner, Modal } from '../components/UI.jsx'
+import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner, Modal, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import ConditionsPanel from '../components/ConditionsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -38,6 +38,11 @@ import { RefreshCw, ShieldCheck, ScrollText, ArrowRight, Plus } from 'lucide-rea
 // and clearing sends null. The rest are the server's own list.
 const BLANK = ''
 
+// Fixed at 5 rather than user-adjustable: this grid's rows are a fixed list of
+// heads, not an open-ended feed, so there is no "load more" case to size for —
+// just a long list that needs to stop making the page itself scroll.
+const PAGE_SIZE = 5
+
 const CELL_TONES = {
   CR: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   DR: 'border-red-200 bg-red-50 text-red-700',
@@ -71,6 +76,12 @@ export default function RulesPage() {
   // Which cell is mid-flight, so a slow save shows and a second click on the
   // same cell cannot race the first.
   const [busyCell, setBusyCell] = useState(null)
+
+  // Fixed at 5 rather than user-adjustable: this grid's rows are a fixed list
+  // of heads, not an open-ended feed, so there is no "load more" case to size
+  // for — just a long list that needs to stop making the page itself scroll.
+  const PAGE_SIZE = 5
+  const [page, setPage] = useState(1)
 
   // The "Add head" dialog. A new head has no data yet, so all it needs is a
   // name — it lands with every cell blank, same as any other unused row.
@@ -110,6 +121,7 @@ export default function RulesPage() {
     if (next === target) return
     setMatrix(null)
     setSearch('')
+    setPage(1)
     setTarget(next)
   }
 
@@ -125,11 +137,22 @@ export default function RulesPage() {
   const unusable = targets.filter((t) => !t.used)
 
   const needle = search.trim().toLowerCase()
-  const shown = useMemo(
+  const filtered = useMemo(
     () => (needle
       ? heads.filter((h) => h.name.toLowerCase().includes(needle))
       : heads),
     [heads, needle],
+  )
+
+  // A search that no longer matches the page you were on would otherwise show
+  // an empty table with results sitting one page back.
+  useEffect(() => { setPage(1) }, [needle, current])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const shown = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage],
   )
 
   // How many heads each column accepts, for the count under its name. Read off
@@ -512,6 +535,12 @@ export default function RulesPage() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              page={safePage}
+              limit={PAGE_SIZE}
+              total={filtered.length}
+              onPage={setPage}
+            />
           </div>
         )}
       </div>
