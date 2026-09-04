@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Lock, ShieldCheck } from 'lucide-react'
+import { Lock, ShieldCheck, Columns3, Check } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Modal, Spinner } from './UI.jsx'
 import {
@@ -40,6 +40,29 @@ const allowedFor = (result, row) => {
   return (cond ? cond.heads : result.expected[row.direction]) || []
 }
 
+// Which statement columns to show beside each conflict, remembered.
+//
+// Per schema, because two companies on the same browser have different columns
+// and a name stored by one is meaningless to the other. The value is a list of
+// column names; what they are called on screen comes from the server every
+// time, so renaming a field on the Field Mapping page renames the header here.
+const columnsKey = () =>
+  `checkrules.columns.${localStorage.getItem('schema') || 'unknown'}`
+
+const readStoredColumns = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(columnsKey()))
+    return Array.isArray(raw) ? raw.filter((n) => typeof n === 'string') : null
+  } catch {
+    // A hand-edited or half-written entry is not worth a broken dialog over.
+    return null
+  }
+}
+
+// Dates arrive ISO, numbers as numbers, everything else as the bank wrote it.
+// Only null and '' become a dash — 0 is a value the statement printed.
+const showValue = (v) => (v === null || v === undefined || v === '' ? '—' : String(v))
+
 export default function CheckRulesDialog({
   isOpen, onClose, canWrite, onChecked, onApplied,
 }) {
@@ -62,6 +85,25 @@ export default function CheckRulesDialog({
   const [choices, setChoices] = useState({})
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
+
+  // The statement columns shown beside each conflict, and whether the menu
+  // offering them is open. Empty until a check has run — the list of columns
+  // comes back with the result, from this company's own fieldmap.
+  const [shown, setShown] = useState([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerRef = useRef(null)
+
+  // Click-away, so the menu behaves like a menu. Bound only while it is open.
+  useEffect(() => {
+    if (!pickerOpen) return
+    const away = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [pickerOpen])
 
   // Fresh lists every time the dialog opens: an import or a Master Data edit
   // since the last open changes both, and a stale account list here means
@@ -114,6 +156,29 @@ export default function CheckRulesDialog({
   const conflicts = (result?.rows || []).filter((r) => r.status === 'conflict')
   const actionable = conflicts.filter((r) => !r.is_locked)
 
+  // In the fieldmap's order, not the order they were ticked — the extra
+  // columns should read like the staging table, which is where the user knows
+  // them from.
+  const extraColumns = (result?.columns || []).filter((c) => shown.includes(c.name))
+
+  const toggleColumn = (name) => {
+    setShown((prev) => {
+      const next = prev.includes(name)
+        ? prev.filter((n) => n !== name)
+        : [...prev, name]
+      // Saved on every tick rather than when the menu closes: this dialog can
+      // be dismissed by the backdrop, by Escape or by finishing the fix, and a
+      // preference that only survives one of those is worse than none.
+      try {
+        localStorage.setItem(columnsKey(), JSON.stringify(next))
+      } catch {
+        // Private browsing, or a full quota. The columns still work for this
+        // session; only remembering them fails, and silently is right.
+      }
+      return next
+    })
+  }
+
   const handleCheck = async () => {
     setChecking(true); setError(''); setResult(null)
     try {
@@ -121,6 +186,16 @@ export default function CheckRulesDialog({
         account_type: type, account_number: account,
       })
       setResult(data)
+
+      // Reconcile the remembered choice against the columns this company
+      // actually has. A field deleted on the Field Mapping page must not leave
+      // a header with nothing under it, and a browser that has never opened
+      // this dialog takes the server's suggestion — what the bank printed,
+      // plus whatever column a condition tested — rather than showing nothing.
+      const offered = new Set((data.columns || []).map((c) => c.name))
+      const stored = readStoredColumns()
+      setShown((stored ?? data.default_columns ?? []).filter((n) => offered.has(n)))
+
       const defaults = {}
       data.rows.forEach((r) => {
         if (r.status !== 'conflict') return
@@ -132,9 +207,14 @@ export default function CheckRulesDialog({
       // The field the rule judged goes with them: fixing a red row through
       // the ordinary editor has to be able to clear its red, and which
       // dropdown that is depends on the rule, not on this component.
+      // The account goes with them so the staging table can ask the server for
+      // just these rows. It sends the account back rather than the ids: the
+      // server re-judges, so the list cannot outlive the findings it is built
+      // from — a row fixed since this check drops out on its own.
       onChecked?.(
         new Set(data.rows.filter((r) => r.status === 'conflict').map((r) => r.id)),
         data.target.field,
+        { account_type: type, account_number: account, label: data.account.label },
       )
     } catch (err) {
       setError(err.message)
@@ -170,7 +250,7 @@ export default function CheckRulesDialog({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="2xl">
       <div className="space-y-4">
         {/* Step 1: which rule, which account. Changing either invalidates the
             check below it, so both resets clear the result. */}
@@ -340,21 +420,73 @@ export default function CheckRulesDialog({
               </div>
             ) : (
               <>
-                <p className="text-sm font-medium text-red-600">
-                  {result.summary.conflicts} of {result.summary.total} rows break
-                  the rule
-                  {result.summary.locked_conflicts > 0 &&
-                    ` (${result.summary.locked_conflicts} locked — unlock to fix)`}
-                  .
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-red-600">
+                    {result.summary.conflicts} of {result.summary.total} rows break
+                    the rule
+                    {result.summary.locked_conflicts > 0 &&
+                      ` (${result.summary.locked_conflicts} locked — unlock to fix)`}
+                    .
+                  </p>
 
-                <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200">
+                  {/* Which statement columns to show beside each row. Date and
+                      amount alone cannot tell two transfers on the same day
+                      apart, and which column does is this company's business:
+                      the list is its fieldmap, under its own names. */}
+                  <div className="relative" ref={pickerRef}>
+                    <button
+                      onClick={() => setPickerOpen((o) => !o)}
+                      className="btn-secondary btn-sm inline-flex items-center"
+                      title="Choose which statement columns to show"
+                    >
+                      <Columns3 className="h-3.5 w-3.5 mr-1.5" />
+                      Columns{extraColumns.length ? ` (${extraColumns.length})` : ''}
+                    </button>
+                    {pickerOpen && (
+                      <div className="absolute right-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                        {(result.columns || []).length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-slate-400">
+                            No columns are mapped yet.
+                          </p>
+                        ) : (
+                          result.columns.map((c) => {
+                            const on = shown.includes(c.name)
+                            return (
+                              <button
+                                key={c.name}
+                                onClick={() => toggleColumn(c.name)}
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                              >
+                                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                                  {on && <Check className="h-3.5 w-3.5 text-primary-600" />}
+                                </span>
+                                <span className={`truncate ${on ? 'text-slate-900' : 'text-slate-500'}`}>
+                                  {c.label}
+                                </span>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-slate-50">
                       <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
                         <th className="px-3 py-2">Date</th>
                         <th className="px-3 py-2 text-right">Amount</th>
                         <th className="px-3 py-2">CR/DR</th>
+                        {extraColumns.map((c) => (
+                          <th
+                            key={c.name}
+                            className={`px-3 py-2 ${c.kind === 'number' ? 'text-right' : ''}`}
+                          >
+                            {c.label}
+                          </th>
+                        ))}
                         <th className="px-3 py-2">Current {result.target.label}</th>
                         <th className="px-3 py-2">Replace with</th>
                       </tr>
@@ -369,6 +501,25 @@ export default function CheckRulesDialog({
                             <td className="px-3 py-2 whitespace-nowrap">{r.txn_date || '—'}</td>
                             <td className="px-3 py-2 text-right font-mono whitespace-nowrap">{fmtAmount(r.amount)}</td>
                             <td className="px-3 py-2 font-mono">{r.direction}</td>
+                            {/* Wrapped in a width-capped block, not truncated:
+                                a bank narration runs 60-80 characters and the
+                                reference at its end is the part that identifies
+                                the payment. Same treatment the staging table
+                                gives the same column. */}
+                            {extraColumns.map((c) => (
+                              <td
+                                key={c.name}
+                                className={`px-3 py-2 align-top ${
+                                  c.kind === 'number'
+                                    ? 'text-right font-mono whitespace-nowrap'
+                                    : ''
+                                }`}
+                              >
+                                <div className="max-w-xs break-words">
+                                  {showValue(r.values?.[c.name])}
+                                </div>
+                              </td>
+                            ))}
                             <td className="px-3 py-2 text-red-700">
                               {r.current_name || <span className="italic">not set</span>}
                               {/* Which sentence judged this row. Only shown when

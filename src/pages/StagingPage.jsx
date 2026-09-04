@@ -134,6 +134,13 @@ export default function StagingPage() {
   // a row through the pencil looks like nothing happened, because red covers
   // the amber that would otherwise say "edited".
   const [conflictField, setConflictField] = useState(null)
+  // The account the last check ran on, and whether the table is narrowed to
+  // the rows it flagged. The account rather than the ids: the server re-judges
+  // on every request, so the filter cannot outlive its own findings — a row
+  // fixed since the check drops out of it by itself, which a captured id list
+  // could never do.
+  const [checkedAccount, setCheckedAccount] = useState(null)
+  const [conflictsOnly, setConflictsOnly] = useState(false)
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -174,6 +181,10 @@ export default function StagingPage() {
       const params = { page, limit, ...filterParams(filters) }
       if (query.trim()) params.search = query.trim()
       if (sort) { params.sort = sort; params.dir = dir }
+      if (conflictsOnly && checkedAccount) {
+        params.rule_conflicts =
+          `${checkedAccount.account_type}:${checkedAccount.account_number}`
+      }
       // The server decides the column set — it is read from the live
       // temp_trans table with names from the fieldmap, so a custom field shows
       // up here the moment it is created, with no change needed on this page.
@@ -198,7 +209,7 @@ export default function StagingPage() {
     } finally {
       setLoading(false)
     }
-  }, [query, page, limit, sort, dir, filters])
+  }, [query, page, limit, sort, dir, filters, conflictsOnly, checkedAccount])
 
   useEffect(() => { load() }, [load])
 
@@ -243,6 +254,10 @@ export default function StagingPage() {
 
   const clearHighlights = () => {
     setEditedIds(new Set()); setLastEdited(null); setConflictIds(new Set())
+    // The filter goes with the colours. A table left silently narrowed after
+    // its highlights were cleared reads as "my rows have gone missing", and
+    // the button that would put it back has just disappeared with them.
+    setConflictsOnly(false); setCheckedAccount(null)
   }
 
   // The value a dropdown should start on for this row.
@@ -472,6 +487,26 @@ export default function StagingPage() {
         description="Everything parsed out of your statements, in temp_trans. Edit a row to set its Business Unit, Head, RERA and TCP categories, or its narration."
         actions={
           <div className="flex items-center gap-2">
+            {/* Only once a check has run, because only then is there anything
+                to narrow to. Red highlights show WHICH rows are wrong; this
+                shows only those rows, so they can be read with every column,
+                sorted and searched, instead of hunted for page by page. */}
+            {checkedAccount && (
+              <button
+                onClick={() => { setConflictsOnly((v) => !v); setPage(1) }}
+                title={conflictsOnly
+                  ? 'Show every staged row again'
+                  : `Show only the rows the last check flagged on ${checkedAccount.label}`}
+                className={`btn-sm inline-flex items-center rounded-lg border px-3 py-1.5 font-medium ${
+                  conflictsOnly
+                    ? 'border-red-300 bg-red-100 text-red-800 hover:bg-red-200'
+                    : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                }`}
+              >
+                <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                {conflictsOnly ? 'Showing flagged only' : 'Show flagged only'}
+              </button>
+            )}
             {/* Only while something is lit. The yellow does not time out, so
                 there has to be a way to put it back that is not "reload the
                 page and hope". Counts the red rule conflicts too — one button
@@ -586,6 +621,28 @@ export default function StagingPage() {
           </span>
         )}
       </div>
+
+      {/* Said out loud, because a reduced row count with no explanation is the
+          one thing on this screen that looks like data loss. Every other
+          filter announces itself in the bar above; this one is a button in the
+          header, which is easy to walk away from and forget. */}
+      {conflictsOnly && checkedAccount && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800">
+          <span>
+            Showing only the{' '}
+            <span className="font-medium">{total.toLocaleString('en-IN')}</span>{' '}
+            {total === 1 ? 'row' : 'rows'} the last check flagged on{' '}
+            <span className="font-medium">{checkedAccount.label}</span>. Fixing a
+            row removes it from this list.
+          </span>
+          <button
+            onClick={() => { setConflictsOnly(false); setPage(1) }}
+            className="btn-sm shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-100"
+          >
+            Show all rows
+          </button>
+        </div>
+      )}
 
       <div className="card">
         {/* relative on this wrapper rather than on the scroll container: the
@@ -920,7 +977,9 @@ export default function StagingPage() {
         isOpen={rulesOpen}
         onClose={() => setRulesOpen(false)}
         canWrite={canWrite}
-        onChecked={(ids, field) => { setConflictIds(ids); setConflictField(field) }}
+        onChecked={(ids, field, account) => {
+          setConflictIds(ids); setConflictField(field); setCheckedAccount(account)
+        }}
         onApplied={async (ids) => {
           // Fixed rows go from red to amber — no longer wrong, but changed,
           // and the amber is the record of what this session touched.
