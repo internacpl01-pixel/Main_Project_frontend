@@ -118,10 +118,8 @@ export default function ConditionsPanel({
       await updateCondition(c.id, withTarget({
         account_type: c.account_type,
         direction: c.direction,
-        subject_field: c.subject_field,
-        operator: c.operator,
-        value1: c.value1,
-        value2: c.value2,
+        tests: (c.tests || []).map(({ subject_field, operator, value1, value2, combinator }) =>
+          ({ subject_field, operator, value1, value2, combinator })),
         head_ids: (c.heads || []).map((h) => h.id),
         is_active: !c.is_active,
       }))

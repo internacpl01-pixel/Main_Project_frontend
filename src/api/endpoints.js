@@ -472,10 +472,13 @@ export async function fetchConditions(target) {
   return data
 }
 
-// `payload` is {account_type, direction, subject_field, operator, value1,
-// value2, head_ids, target, is_active}. head_ids is ordered: the first is what
-// the Replace dropdown preselects, and every one of them must be a row of
-// `target`'s master — the database refuses the mix, not just the API.
+// `payload` is {account_type, direction, tests, head_ids, target, is_active}.
+// `tests` is one or more {subject_field, operator, value1, value2,
+// combinator} — the first test's combinator is ignored, every one after it
+// must say AND or OR against the one before it, and AND binds tighter (a run
+// of ANDs between ORs). head_ids is ordered: the first is what the Replace
+// dropdown preselects, and every one of them must be a row of `target`'s
+// master — the database refuses the mix, not just the API.
 export async function createCondition(payload) {
   const { data } = await api.post('/rules/conditions', payload)
   return data

@@ -8,6 +8,7 @@ import { Plus, X, FlaskConical } from 'lucide-react'
 //   WHEN account type is [RERA]
 //    AND the row is a    [debit]
 //    AND [Narration] [contains] [REFUND]
+//     OR [Narration] [contains] [GST]
 //   THEN it is [Cust Cancellation]
 //
 // Every dropdown is filled from GET /rules/conditions. No account type, column
@@ -16,16 +17,26 @@ import { Plus, X, FlaskConical } from 'lucide-react'
 // version of the browser has never heard of still appears the moment the server
 // implements it. The one thing this page decides for itself is how many value
 // boxes to draw, and it reads that off the operator too.
+//
+// A condition can carry more than one test since the AND/OR feature landed:
+// the first is unlabelled, every one after it picks AND or OR against the one
+// before it, and AND binds tighter than OR — the plain reading of a chain with
+// no brackets, and the shape asked for over an explicit group picker.
+
+// One blank test: a column still to be chosen, no operator until a column
+// says what kinds it can answer. `combinator` is meaningless on the first test
+// and ignored there; every test after it needs one, defaulted to AND since
+// narrowing is the more common ask than widening.
+const emptyTest = (combinator = null) => ({
+  subject_field: '', operator: '', value1: '', value2: '', combinator,
+})
 
 // A condition names its answer directly, so unlike the grid there is no blank
 // option here — a condition with no head is not a rule, it is half a sentence.
 const emptyDraft = (opts) => ({
   account_type: opts.account_types?.[0] || '',
   direction: opts.directions?.[0] || 'CR',
-  subject_field: '',
-  operator: '',
-  value1: '',
-  value2: '',
+  tests: [emptyTest()],
   head_ids: [''],
   is_active: true,
 })
@@ -57,57 +68,66 @@ export default function ConditionBuilder({
       ? {
           account_type: editing.account_type,
           direction: editing.direction,
-          subject_field: editing.subject_field,
-          operator: editing.operator,
-          value1: editing.value1 ?? '',
-          value2: editing.value2 ?? '',
+          tests: (editing.tests || []).map((t) => ({
+            subject_field: t.subject_field,
+            operator: t.operator,
+            value1: t.value1 ?? '',
+            value2: t.value2 ?? '',
+            combinator: t.combinator,
+          })),
           head_ids: (editing.heads || []).map((h) => String(h.id)),
           is_active: editing.is_active,
         }
       : emptyDraft(options || {}))
   }, [isOpen, editing, options])
 
-  const column = columns.find((c) => c.name === draft.subject_field)
-  // Only the tests this column can answer. "More than" on a narration is not a
+  const columnFor = (field) => columns.find((c) => c.name === field)
+  // Only the tests a column can answer. "More than" on a narration is not a
   // rule anyone can satisfy, and the server rejects it — so it is not offered.
-  const usable = useMemo(
-    () => operators.filter((o) => column && o.kinds.includes(column.kind)),
-    [operators, column],
-  )
-  const operator = operators.find((o) => o.name === draft.operator)
-  const arity = operator?.values ?? 0
+  const usableFor = (field) => {
+    const col = columnFor(field)
+    return operators.filter((o) => col && o.kinds.includes(col.kind))
+  }
+  const arityFor = (op) => operators.find((o) => o.name === op)?.values ?? 0
 
   const set = (patch) => {
     setDraft((d) => ({ ...d, ...patch }))
     setPreview(null)
   }
 
+  const setTest = (i, patch) =>
+    set({ tests: draft.tests.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
+
   // Changing the column can strand the operator on a kind it does not apply to.
   // Rather than leave an impossible pair on screen, fall to the first test the
   // new column can answer.
-  const pickColumn = (name) => {
+  const pickColumn = (i, name) => {
     const next = columns.find((c) => c.name === name)
+    const current = draft.tests[i]
     const stillValid = operators.find(
-      (o) => o.name === draft.operator && next && o.kinds.includes(next.kind))
+      (o) => o.name === current.operator && next && o.kinds.includes(next.kind))
     const fallback = operators.find((o) => next && o.kinds.includes(next.kind))
-    set({
+    setTest(i, {
       subject_field: name,
-      operator: stillValid ? draft.operator : (fallback?.name || ''),
+      operator: stillValid ? current.operator : (fallback?.name || ''),
       value1: '', value2: '',
     })
   }
 
-  const pickOperator = (name) => {
+  const pickOperator = (i, name) => {
     const op = operators.find((o) => o.name === name)
     // Values the new test does not use are dropped rather than carried unseen —
     // the server would discard them anyway, and a hidden value is one the
     // sentence on screen would not mention.
-    set({
+    setTest(i, {
       operator: name,
-      value1: (op?.values ?? 0) >= 1 ? draft.value1 : '',
-      value2: (op?.values ?? 0) === 2 ? draft.value2 : '',
+      value1: (op?.values ?? 0) >= 1 ? draft.tests[i].value1 : '',
+      value2: (op?.values ?? 0) === 2 ? draft.tests[i].value2 : '',
     })
   }
+
+  const addTest = () => set({ tests: [...draft.tests, emptyTest('AND')] })
+  const removeTest = (i) => set({ tests: draft.tests.filter((_, j) => j !== i) })
 
   const setHead = (i, value) =>
     set({ head_ids: draft.head_ids.map((h, j) => (j === i ? value : h)) })
@@ -115,18 +135,29 @@ export default function ConditionBuilder({
   const removeHead = (i) =>
     set({ head_ids: draft.head_ids.filter((_, j) => j !== i) })
 
-  const testReady = Boolean(
-    draft.account_type && draft.direction && draft.subject_field &&
-    draft.operator && (arity < 1 || draft.value1) && (arity < 2 || draft.value2))
+  const testsReady = draft.tests.length > 0 && draft.tests.every((t) => {
+    const arity = arityFor(t.operator)
+    return t.subject_field && t.operator &&
+      (arity < 1 || t.value1) && (arity < 2 || t.value2)
+  })
+  const testReady = Boolean(draft.account_type && draft.direction) && testsReady
   const complete = testReady && draft.head_ids.some(Boolean)
+
+  const cleanTests = () => draft.tests.map((t, i) => {
+    const arity = arityFor(t.operator)
+    return {
+      subject_field: t.subject_field,
+      operator: t.operator,
+      value1: arity >= 1 ? t.value1 : null,
+      value2: arity === 2 ? t.value2 : null,
+      combinator: i === 0 ? null : t.combinator,
+    }
+  })
 
   const payload = () => ({
     account_type: draft.account_type,
     direction: draft.direction,
-    subject_field: draft.subject_field,
-    operator: draft.operator,
-    value1: arity >= 1 ? draft.value1 : null,
-    value2: arity === 2 ? draft.value2 : null,
+    tests: cleanTests(),
     head_ids: draft.head_ids.filter(Boolean).map(Number),
     is_active: draft.is_active,
   })
@@ -134,13 +165,16 @@ export default function ConditionBuilder({
   const handlePreview = async () => {
     setPreviewing(true); setError('')
     try {
-      const { head_ids, is_active, ...test } = payload()
       // The head type goes even though the preview asks only the IF half: it
       // decides which head the examples show as the row's current one, and
       // showing the RERA head beside an Internal Head condition would be
       // showing the column this sentence is not about.
-      setPreview(await previewCondition(
-        { ...test, target: options?.target?.target }))
+      setPreview(await previewCondition({
+        account_type: draft.account_type,
+        direction: draft.direction,
+        tests: cleanTests(),
+        target: options?.target?.target,
+      }))
     } catch (err) {
       setError(err.message); setPreview(null)
     } finally {
@@ -201,59 +235,93 @@ export default function ConditionBuilder({
             </select>
           </div>
 
-          {/* AND — the one further test, on one column. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="w-14 font-medium text-slate-400">AND</span>
-            <select
-              className="input w-auto py-1"
-              value={draft.subject_field}
-              onChange={(e) => pickColumn(e.target.value)}
-            >
-              <option value="">— choose a column —</option>
-              {columns.map((c) => (
-                <option key={c.name} value={c.name}>{c.label}</option>
-              ))}
-            </select>
-            <select
-              className="input w-auto py-1"
-              value={draft.operator}
-              disabled={!column}
-              onChange={(e) => pickOperator(e.target.value)}
-            >
-              {!column && <option value="">— pick a column first —</option>}
-              {usable.map((o) => (
-                <option key={o.name} value={o.name}>{o.label}</option>
-              ))}
-            </select>
-            {arity >= 1 && (
-              <input
-                className="input w-44 py-1"
-                type={inputTypeFor(column?.kind)}
-                value={draft.value1}
-                placeholder="value"
-                onChange={(e) => set({ value1: e.target.value })}
-              />
-            )}
-            {arity === 2 && (
-              <>
-                <span className="text-slate-500">and</span>
-                <input
-                  className="input w-44 py-1"
-                  type={inputTypeFor(column?.kind)}
-                  value={draft.value2}
-                  placeholder="value"
-                  onChange={(e) => set({ value2: e.target.value })}
-                />
-              </>
-            )}
-          </div>
-          {column && (
-            <p className="pl-16 text-xs text-slate-400">
-              {column.label} holds {column.kind} values, so
-              only {column.kind} tests are offered. Text is matched without regard
-              to upper or lower case.
-            </p>
-          )}
+          {/* AND/OR — one or more tests. The first is unlabelled; every one
+              after it picks how it joins the one before it. AND binds tighter
+              than OR, so "A and B or C" reads as "(A and B) or C". */}
+          {draft.tests.map((t, i) => {
+            const col = columnFor(t.subject_field)
+            const usable = usableFor(t.subject_field)
+            const arity = arityFor(t.operator)
+            return (
+              <div key={i} className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  {i === 0 ? (
+                    <span className="w-14 font-medium text-slate-400">AND</span>
+                  ) : (
+                    <select
+                      className="input w-14 py-1"
+                      value={t.combinator || 'AND'}
+                      onChange={(e) => setTest(i, { combinator: e.target.value })}
+                    >
+                      <option value="AND">AND</option>
+                      <option value="OR">OR</option>
+                    </select>
+                  )}
+                  <select
+                    className="input w-auto py-1"
+                    value={t.subject_field}
+                    onChange={(e) => pickColumn(i, e.target.value)}
+                  >
+                    <option value="">— choose a column —</option>
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>{c.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="input w-auto py-1"
+                    value={t.operator}
+                    disabled={!col}
+                    onChange={(e) => pickOperator(i, e.target.value)}
+                  >
+                    {!col && <option value="">— pick a column first —</option>}
+                    {usable.map((o) => (
+                      <option key={o.name} value={o.name}>{o.label}</option>
+                    ))}
+                  </select>
+                  {arity >= 1 && (
+                    <input
+                      className="input w-44 py-1"
+                      type={inputTypeFor(col?.kind)}
+                      value={t.value1}
+                      placeholder="value"
+                      onChange={(e) => setTest(i, { value1: e.target.value })}
+                    />
+                  )}
+                  {arity === 2 && (
+                    <>
+                      <span className="text-slate-500">and</span>
+                      <input
+                        className="input w-44 py-1"
+                        type={inputTypeFor(col?.kind)}
+                        value={t.value2}
+                        placeholder="value"
+                        onChange={(e) => setTest(i, { value2: e.target.value })}
+                      />
+                    </>
+                  )}
+                  {draft.tests.length > 1 && (
+                    <button
+                      onClick={() => removeTest(i)}
+                      title="Remove this test"
+                      className="text-slate-400 hover:text-red-600 cursor-pointer"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {col && (
+                  <p className="pl-16 text-xs text-slate-400">
+                    {col.label} holds {col.kind} values, so
+                    only {col.kind} tests are offered. Text is matched without
+                    regard to upper or lower case.
+                  </p>
+                )}
+              </div>
+            )
+          })}
+          <button onClick={addTest} className="btn-secondary btn-sm">
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add AND/OR
+          </button>
         </div>
 
         {/* THEN — the answer. Any active head, including one left blank on the
@@ -295,9 +363,11 @@ export default function ConditionBuilder({
               <Plus className="h-3.5 w-3.5 mr-1" /> Add another head
             </button>
             <p className="text-xs text-slate-400">
-              The first is what Replace preselects. A head left blank on the grid
-              can be named here — that is how it becomes valid only when this
-              test passes.
+              The first is what Replace preselects. A head the grid marks for a
+              different direction on this account type can be named here — that
+              is how it becomes valid for this direction only when the test
+              passes. A head never used on this account type at all cannot be
+              named until the grid gives it a CR or DR there first.
             </p>
           </div>
         </div>
@@ -334,7 +404,14 @@ export default function ConditionBuilder({
                 <ul className="mt-2 space-y-1">
                   {preview.examples.map((e) => (
                     <li key={e.id} className="truncate text-xs text-slate-500">
-                      <span className="font-mono">{e.amount}</span> — {e.value}
+                      <span className="font-mono">{e.amount}</span> —{' '}
+                      {/* One or more columns, since one or more tests can each
+                          read a different one; keyed by column name, not a
+                          single value, since that stopped being enough the
+                          moment a condition could carry more than one test. */}
+                      {Object.entries(e.values || {})
+                        .map(([field, v]) => `${columnFor(field)?.label || field}: ${v ?? '—'}`)
+                        .join(', ')}
                       {e.current_name && (
                         <span className="text-slate-400">
                           {' '}(currently {e.current_name})
