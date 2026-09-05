@@ -94,7 +94,12 @@ export default function MasterDataPage() {
     if (!masterType) return
     setLoading(true)
     try {
-      const data = await fetchMasterData(masterType)
+      // This table is where inactive rows are managed back to active, so it
+      // has to keep showing them — the default list, used everywhere a
+      // dropdown fills itself, hides them on purpose. Only this fetch asks
+      // for the fuller list; optionSets below still gets the active-only one,
+      // so an archived head does not reappear in a picker by mistake.
+      const data = await fetchMasterData(masterType, { include_inactive: true })
       setAllItems(Array.isArray(data) ? data : [])
     } catch (err) {
       toast.error(err.message)
