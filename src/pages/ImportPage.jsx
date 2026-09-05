@@ -311,7 +311,9 @@ export default function ImportPage() {
                   ))}
                 </select>
                 <p className="mt-1 text-xs text-slate-400">
-                  Tags every row with the account it came from. Optional.
+                  Tags every row with the account it came from, and fills the
+                  Account Number field on any row the statement itself left
+                  blank. Optional.
                 </p>
               </div>
 
