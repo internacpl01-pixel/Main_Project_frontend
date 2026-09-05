@@ -332,7 +332,12 @@ export default function MasterDataPage() {
     if (!deleteTarget) return
     setSaving(true)
     try {
-      await deleteMasterEntry(masterType, deleteTarget.id)
+      // A real DELETE, not the archive the toggle already does — the trash
+      // icon is the one-way door, and the toggle is the reversible one. The
+      // two used to collide on the same soft-delete, so deleting a row and
+      // switching it off were indistinguishable, and there was no way to
+      // actually remove one.
+      await deleteMasterEntry(masterType, deleteTarget.id, true)
       toast.success(`${config.label} deleted`)
       setDeleteTarget(null)
       if (pageItems.length <= 1 && page > 1) {
@@ -939,8 +944,9 @@ export default function MasterDataPage() {
         onConfirm={handleDelete}
         title={`Delete ${config.label}`}
         message={
-          `Delete "${deleteTarget?.[config.fields[0]?.key] || 'this entry'}"? ` +
-          'This cannot be undone.'
+          `Permanently delete "${deleteTarget?.[config.fields[0]?.key] || 'this entry'}"? ` +
+          'It is removed from the database and cannot be recovered — switch ' +
+          'it off with the toggle instead if you may want it back later.'
         }
         confirmText={saving ? 'Deleting...' : 'Delete'}
         busy={saving}

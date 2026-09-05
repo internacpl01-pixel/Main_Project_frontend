@@ -286,8 +286,9 @@ export async function updateMasterEntry(masterType, itemId, payload) {
   return data
 }
 
-export async function deleteMasterEntry(masterType, itemId) {
-  const { data } = await api.delete(`/master/${masterType}/${itemId}`)
+export async function deleteMasterEntry(masterType, itemId, permanent = false) {
+  const { data } = await api.delete(
+    `/master/${masterType}/${itemId}`, { params: { permanent } })
   return data
 }
 
