@@ -657,12 +657,20 @@ export default function CheckRulesDialog({
                               {/* Which sentence judged this row. Only shown when
                                   a condition did — "the grid" is the default and
                                   saying so on every row would be noise. */}
-                              {cond && (
+                              {cond ? (
                                 <span
                                   className="ml-1 rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[10px] font-medium text-violet-700"
                                   title={cond.sentence}
                                 >
                                   by condition
+                                </span>
+                              ) : (
+                                <span
+                                  className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[10px] font-medium text-slate-500"
+                                  title={result.why?.[r.direction] ||
+                                    `The ${result.account_type} grid's ${r.direction} column, for this head type.`}
+                                >
+                                  by grid
                                 </span>
                               )}
                             </td>
