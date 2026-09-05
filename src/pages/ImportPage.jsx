@@ -102,7 +102,13 @@ export default function ImportPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    fetchMasterData('bank').then((b) => setBanks(Array.isArray(b) ? b : [])).catch(() => {})
+    // Inactive ones are fetched too, but only to be shown greyed out and
+    // unpickable — a bank switched off must still not be usable to tag a
+    // fresh import, it just should not look like it vanished off the list
+    // someone was scrolling.
+    fetchMasterData('bank', { include_inactive: true })
+      .then((b) => setBanks(Array.isArray(b) ? b : []))
+      .catch(() => {})
   }, [])
 
   const handleFile = useCallback(async (f) => {
@@ -305,8 +311,9 @@ export default function ImportPage() {
                     {banks.length === 0 ? 'No bank accounts in Master Data yet' : 'Not specified'}
                   </option>
                   {banks.map((b) => (
-                    <option key={b.id} value={b.id}>
+                    <option key={b.id} value={b.id} disabled={!b.is_active}>
                       {b.account_number ? `${b.bank_name} — ${b.account_number}` : b.bank_name}
+                      {!b.is_active ? ' (deactivated)' : ''}
                     </option>
                   ))}
                 </select>
