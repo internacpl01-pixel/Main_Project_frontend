@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Lock, ShieldCheck, Columns3, Check } from 'lucide-react'
+import { Lock, ShieldCheck, Columns3, Check, Info } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Modal, Spinner } from './UI.jsx'
 import {
@@ -106,6 +106,23 @@ export default function CheckRulesDialog({
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerRef = useRef(null)
 
+  // Which row's "why this head" popover is open, if any. One at a time, and
+  // closed by clicking anywhere else — the icon is there to be glanced at, not
+  // to leave a dozen explanations pinned open over the table.
+  const [infoOpenId, setInfoOpenId] = useState(null)
+  const infoRef = useRef(null)
+
+  useEffect(() => {
+    if (infoOpenId == null) return
+    const away = (e) => {
+      if (infoRef.current && !infoRef.current.contains(e.target)) {
+        setInfoOpenId(null)
+      }
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [infoOpenId])
+
   // Click-away, so the menu behaves like a menu. Bound only while it is open.
   useEffect(() => {
     if (!pickerOpen) return
@@ -194,7 +211,7 @@ export default function CheckRulesDialog({
   // written by hand. A row saved from its own dropdown is done, and counting it
   // again would have the button offer to redo a decision already made.
   const actionable = conflicts.filter(
-    (r) => !r.is_locked && rowState[r.id]?.status !== 'saved')
+    (r) => !r.is_locked && !['saved', 'skipped'].includes(rowState[r.id]?.status))
 
   // In the fieldmap's order, not the order they were ticked — the extra
   // columns should read like the staging table, which is where the user knows
@@ -264,6 +281,14 @@ export default function CheckRulesDialog({
         ...prev, [row.id]: { status: 'error', message: err.message },
       }))
     }
+  }
+
+  // Marks one row as dealt with without writing anything. It only removes the
+  // row from the bulk button's count for this open dialog — the row itself
+  // stays exactly as it is, still red on the staging table behind, since
+  // nothing here told the server anything changed.
+  const handleSkip = (row) => {
+    setRowState((prev) => ({ ...prev, [row.id]: { status: 'skipped' } }))
   }
 
   const handleCheck = async () => {
@@ -627,7 +652,9 @@ export default function CheckRulesDialog({
                             className={
                               state?.status === 'saved'
                                 ? 'bg-green-50'
-                                : `bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`
+                                : state?.status === 'skipped'
+                                  ? 'bg-slate-50 opacity-70'
+                                  : `bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`
                             }
                           >
                             <td className="px-3 py-2 whitespace-nowrap">{r.txn_date || '—'}</td>
@@ -679,6 +706,24 @@ export default function CheckRulesDialog({
                                 <span className="inline-flex items-center text-xs text-slate-500">
                                   <Lock className="h-3 w-3 mr-1" /> locked — skipped
                                 </span>
+                              ) : state?.status === 'skipped' ? (
+                                // Nothing was written — this only hides the row
+                                // from the bulk button for the rest of this
+                                // open dialog. Undoable, because a row skipped
+                                // by mistake should not need the dialog reopened.
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-slate-400">skipped for now</span>
+                                  <button
+                                    onClick={() => setRowState((prev) => {
+                                      const next = { ...prev }
+                                      delete next[r.id]
+                                      return next
+                                    })}
+                                    className="text-xs text-primary-600 hover:underline"
+                                  >
+                                    undo
+                                  </button>
+                                </div>
                               ) : allowed.length > 1 ? (
                                 // Debits have two legitimate answers, so each
                                 // row decides for itself; the rule's first
@@ -708,9 +753,73 @@ export default function CheckRulesDialog({
                                       not saved
                                     </span>
                                   )}
+                                  {!state && (
+                                    <button
+                                      onClick={() => handleSkip(r)}
+                                      title="Leave this row exactly as it is for now"
+                                      className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                                    >
+                                      skip for now
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
-                                <span className="text-green-700">{allowed[0]?.name}</span>
+                                <div className="relative flex items-center gap-2">
+                                  <span className="text-green-700">{allowed[0]?.name}</span>
+                                  <button
+                                    onClick={() => setInfoOpenId(
+                                      infoOpenId === r.id ? null : r.id)}
+                                    title="Why this head?"
+                                    className="shrink-0 text-slate-300 hover:text-slate-500"
+                                  >
+                                    <Info className="h-3.5 w-3.5" />
+                                  </button>
+                                  {infoOpenId === r.id && (
+                                    <div
+                                      ref={infoRef}
+                                      className="absolute left-0 top-6 z-20 w-64 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-lg"
+                                    >
+                                      {cond ? (
+                                        <>
+                                          <p className="mb-1 font-medium text-violet-700">
+                                            From a condition
+                                          </p>
+                                          <p>{cond.sentence}</p>
+                                          <p className="mt-1 text-slate-400">
+                                            That sentence matched this row, so its
+                                            head{cond.heads?.length > 1 ? 's are' : ' is'} the
+                                            only answer here — the grid is not
+                                            consulted once a condition matches.
+                                          </p>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <p className="mb-1 font-medium text-slate-700">
+                                            From the grid
+                                          </p>
+                                          <p>
+                                            {result.why?.[r.direction] ||
+                                              `The ${result.account_type} rule's ` +
+                                              `${r.direction} column, for ${result.target.label}.`}
+                                          </p>
+                                          <p className="mt-1 text-slate-400">
+                                            No condition matched this row, so it
+                                            falls back to whatever the grid says a{' '}
+                                            {r.direction === 'CR' ? 'credit' : 'debit'} on
+                                            this account should be.
+                                          </p>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                  <button
+                                    onClick={() => handleSkip(r)}
+                                    title="Leave this row exactly as it is for now"
+                                    className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                                  >
+                                    skip for now
+                                  </button>
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -738,14 +847,6 @@ export default function CheckRulesDialog({
                 finished dialog is the X, not a button that does nothing. */}
             {canWrite && result.summary.conflicts > 0 && (
               <div className="flex justify-end gap-3 pt-2">
-                <button
-                  onClick={onClose}
-                  disabled={applying}
-                  title="Close without changing anything — the flagged rows stay red on the staging table"
-                  className="btn-secondary text-sm"
-                >
-                  Skip for now
-                </button>
                 <button
                   onClick={handleApply}
                   disabled={applying || actionable.length === 0}
