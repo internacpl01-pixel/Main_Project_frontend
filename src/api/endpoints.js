@@ -291,6 +291,11 @@ export async function deleteMasterEntry(masterType, itemId) {
   return data
 }
 
+export async function activateMasterEntry(masterType, itemId) {
+  const { data } = await api.post(`/master/${masterType}/${itemId}/activate`)
+  return data
+}
+
 // ── Transactions (ledger) ────────────────────────────────────────────────────
 
 // Paged. Returns { columns, rows, total, page, limit } — `total` is the count

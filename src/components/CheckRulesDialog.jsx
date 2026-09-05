@@ -731,6 +731,14 @@ export default function CheckRulesDialog({
             {canWrite && result.summary.conflicts > 0 && (
               <div className="flex justify-end gap-3 pt-2">
                 <button
+                  onClick={onClose}
+                  disabled={applying}
+                  title="Close without changing anything — the flagged rows stay red on the staging table"
+                  className="btn-secondary text-sm"
+                >
+                  Skip for now
+                </button>
+                <button
                   onClick={handleApply}
                   disabled={applying || actionable.length === 0}
                   title={actionable.length === 0

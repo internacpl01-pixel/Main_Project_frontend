@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
-  importBeneficiaries, deleteAllBeneficiaries, fetchProjects,
+  activateMasterEntry, importBeneficiaries, deleteAllBeneficiaries, fetchProjects,
 } from '../api/endpoints.js'
 import {
   Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, TableBusy, SkeletonRows,
@@ -50,6 +50,7 @@ export default function MasterDataPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [togglingId, setTogglingId] = useState(null)
 
   // Rows of every master type some field on this tab draws its options from,
   // keyed by that type. Beneficiary's nine head fields are the only user today.
@@ -341,6 +342,28 @@ export default function MasterDataPage() {
     }
   }
 
+  // Flips a row between active and inactive in place — the same status a
+  // fresh delete leaves behind, just reachable both ways without a second
+  // confirmation dialog. Deactivating still goes through the archive route
+  // (soft delete), so anything already referencing this row is unaffected.
+  const handleToggleActive = async (item) => {
+    setTogglingId(item.id)
+    try {
+      if (item.is_active) {
+        await deleteMasterEntry(masterType, item.id)
+        toast.success(`${config.label} deactivated`)
+      } else {
+        await activateMasterEntry(masterType, item.id)
+        toast.success(`${config.label} activated`)
+      }
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   // Generate page numbers for pagination
   const pageNumbers = useMemo(() => {
     const pages = []
@@ -510,11 +533,28 @@ export default function MasterDataPage() {
                         </td>
                       ))}
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          item.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {item.is_active ? 'Active' : 'Inactive'}
-                        </span>
+                        {canWrite ? (
+                          <button
+                            onClick={() => handleToggleActive(item)}
+                            disabled={togglingId === item.id}
+                            title={item.is_active ? 'Click to deactivate' : 'Click to activate'}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${
+                              item.is_active ? 'bg-emerald-500' : 'bg-slate-300'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                item.is_active ? 'translate-x-[18px]' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                            item.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {item.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex items-center justify-end gap-1">
