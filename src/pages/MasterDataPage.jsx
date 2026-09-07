@@ -123,7 +123,12 @@ export default function MasterDataPage() {
 
     let cancelled = false
     Promise.all(types.map((t) =>
-      (EXTERNAL_OPTION_SOURCES[t]?.fetch ?? (() => fetchMasterData(t)))()
+      // Inactive rows ride along here too, so a beneficiary already carrying
+      // a since-deactivated head still shows it in its own field instead of
+      // going blank — optionsFor below renders it disabled rather than
+      // dropping it, same rule as every other picker in the app.
+      (EXTERNAL_OPTION_SOURCES[t]?.fetch
+        ?? (() => fetchMasterData(t, { include_inactive: true })))()
         .then((rows) => [t, Array.isArray(rows) ? rows : []])
         // One failed list must not blank the others: that field falls back to
         // an empty dropdown and the rest of the form still works.
@@ -158,6 +163,10 @@ export default function MasterDataPage() {
         return {
           value,
           label: shown && shown !== value ? `${value} — ${shown}` : value,
+          // Absent for a source with no is_active column (a project, from
+          // /projects) reads as active — that endpoint already sends only
+          // active ones, so there is nothing to grey out.
+          active: row.is_active !== false,
         }
       })
       .filter(Boolean)
@@ -168,7 +177,9 @@ export default function MasterDataPage() {
       group.filter((k) => k !== field.key).map((k) => form[k]).filter(Boolean)
     )
     // The field's own current value stays listed, or editing a saved row would
-    // show a blank select over a value that is really there.
+    // show a blank select over a value that is really there. A value already
+    // taken elsewhere in the group is still excluded even if inactive — an
+    // archived head cannot become the second of three either.
     return all.filter((o) => !taken.has(o.value) || o.value === form[field.key])
   }, [optionSets, schema, config, form])
 
@@ -898,7 +909,9 @@ export default function MasterDataPage() {
                 >
                   <option value="">Select...</option>
                   {optionsFor(field).map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                    <option key={o.value} value={o.value} disabled={!o.active}>
+                      {o.label}{!o.active ? ' (deactivated)' : ''}
+                    </option>
                   ))}
                 </select>
               ) : field.type === 'select' ? (

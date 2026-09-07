@@ -246,10 +246,10 @@ export default function ConditionBuilder({
               <div key={i} className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {i === 0 ? (
-                    <span className="w-14 font-medium text-slate-400">AND</span>
+                    <span className="w-20 font-medium text-slate-400">AND</span>
                   ) : (
                     <select
-                      className="input w-14 py-1"
+                      className="input w-20 py-1 font-medium"
                       value={t.combinator || 'AND'}
                       onChange={(e) => setTest(i, { combinator: e.target.value })}
                     >
@@ -345,7 +345,9 @@ export default function ConditionBuilder({
                 >
                   <option value="">— choose a head —</option>
                   {heads.map((h) => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
+                    <option key={h.id} value={h.id} disabled={h.is_active === false}>
+                      {h.name}{h.is_active === false ? ' (deactivated)' : ''}
+                    </option>
                   ))}
                 </select>
                 {draft.head_ids.length > 1 && (

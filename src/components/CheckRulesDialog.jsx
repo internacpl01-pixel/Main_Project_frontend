@@ -467,11 +467,12 @@ export default function CheckRulesDialog({
                     : '— choose an account —'}
               </option>
               {accountsForType.map((a) => (
-                <option key={a.value} value={a.value}>
+                <option key={a.value} value={a.value} disabled={a.bank_active === false}>
                   {a.label} · {a.count} {a.count === 1 ? 'row' : 'rows'}
                   {a.spellings > 1
                     ? ` (written ${a.spellings} ways in the statements)`
                     : ''}
+                  {a.bank_active === false ? ' — bank deactivated' : ''}
                 </option>
               ))}
             </select>

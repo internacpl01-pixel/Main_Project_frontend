@@ -157,7 +157,15 @@ export default function StagingPage() {
       setOptionsLoading(true)
       const results = await Promise.all(
         PICKERS.map((p) =>
-          (p.source === 'projects' ? fetchProjects() : fetchMasterData(p.master))
+          // Master tables bring their inactive rows along too — a row on this
+          // page may already carry a head that has since been switched off,
+          // and the dropdown showing it (greyed out, unpickable) is how that
+          // stays visible instead of looking unset. Projects are untouched:
+          // that list is scoped per user by /projects itself, and has no
+          // inactive-inclusion option to ask for.
+          (p.source === 'projects'
+            ? fetchProjects()
+            : fetchMasterData(p.master, { include_inactive: true }))
             .catch(() => [])
         )
       )
@@ -173,6 +181,10 @@ export default function StagingPage() {
           // id, so the name is what the dialog matches on to preselect.
           name: o.name,
           label: o.code ? `${o.name} (${o.code})` : o.name,
+          // Projects carry no is_active here (not requested), so they read as
+          // active — consistent with /projects already only ever sending
+          // active ones.
+          active: o.is_active !== false,
         }))
       })
       setOptions(next)
@@ -1045,7 +1057,9 @@ export default function StagingPage() {
                           : '— none —'}
                       </option>
                       {list.map((o) => (
-                        <option key={o.id} value={o.id}>{o.label}</option>
+                        <option key={o.id} value={o.id} disabled={!o.active}>
+                          {o.label}{!o.active ? ' (deactivated)' : ''}
+                        </option>
                       ))}
                     </select>
                     <p className="mt-1 text-xs text-slate-400">{p.hint}</p>
