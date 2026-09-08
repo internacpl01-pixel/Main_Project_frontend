@@ -35,10 +35,14 @@ const accountDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^0+/, '
 // are then the only answer — not the grid's, which may be a different and wider
 // set. Reading it from the same place the check did is the whole point: the
 // dropdown cannot offer a head the server would refuse on apply.
-const allowedFor = (result, row) => {
-  const cond = row.rule_id != null && result.conditions?.[String(row.rule_id)]
-  return (cond ? cond.heads : result.expected[row.direction]) || []
-}
+// `row.heads` is what resolve() actually decided for this row — sent
+// straight from the check rather than re-derived here, because when more
+// than one condition matches (a keyword shared across several of them) that
+// list is the UNION of every match, not just the first one `rule_id` names.
+// Falls back to the grid's own heads for a row the check ran before this
+// existed, or the grid's set when no condition matched at all.
+const allowedFor = (result, row) =>
+  row.heads || result.expected[row.direction] || []
 
 // Which statement columns to show beside each conflict, remembered.
 //
@@ -643,6 +647,16 @@ export default function CheckRulesDialog({
                         const state = rowState[r.id]
                         const cond = r.rule_id != null
                           && result.conditions?.[String(r.rule_id)]
+                        // A keyword shared across several conditions (the
+                        // company's own name, say) can make more than one of
+                        // them true for the same row — resolve() still picks
+                        // rule_id as "the" condition for sentence purposes,
+                        // but every id here also matched and its head is one
+                        // of the choices in the dropdown below.
+                        const extraIds = r.extra_rule_ids || []
+                        const extraSentences = extraIds
+                          .map((id) => result.conditions?.[String(id)]?.sentence)
+                          .filter(Boolean)
                         return (
                           // Green once written: the row is no longer a finding,
                           // it is a thing that has been dealt with, and leaving
@@ -685,7 +699,18 @@ export default function CheckRulesDialog({
                               {/* Which sentence judged this row. Only shown when
                                   a condition did — "the grid" is the default and
                                   saying so on every row would be noise. */}
-                              {cond ? (
+                              {cond && extraSentences.length > 0 && allowed.length > 1 ? (
+                                <span
+                                  className="ml-1 rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700"
+                                  title={
+                                    `${extraSentences.length + 1} conditions matched this row — ` +
+                                    `pick which one is right below.\n\n` +
+                                    [cond.sentence, ...extraSentences].map((s, i) => `${i + 1}. ${s}`).join('\n')
+                                  }
+                                >
+                                  ambiguous ({extraSentences.length + 1})
+                                </span>
+                              ) : cond ? (
                                 <span
                                   className="ml-1 rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[10px] font-medium text-violet-700"
                                   title={cond.sentence}
