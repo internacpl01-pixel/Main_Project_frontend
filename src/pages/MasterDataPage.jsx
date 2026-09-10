@@ -741,7 +741,9 @@ export default function MasterDataPage() {
                   ['Rows', preview.total_rows, 'text-slate-700'],
                   ['To add', preview.importable, 'text-emerald-600'],
                   ['Already exist', preview.duplicate_count, 'text-amber-600'],
-                  ['Other company', preview.cross_company_count, 'text-sky-600'],
+                  importer?.hasCrossCompany
+                    ? ['Other company', preview.cross_company_count, 'text-sky-600']
+                    : ['Repeated in sheet', preview.sheet_duplicate_count ?? 0, 'text-sky-600'],
                   ['Rejected', preview.error_count, 'text-red-600'],
                 ].map(([label, value, tone]) => (
                   <div key={label} className="card p-3">
