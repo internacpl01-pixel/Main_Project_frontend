@@ -705,3 +705,12 @@ export async function exportTransactions(format = 'csv', params = {}) {
   })
   return data
 }
+
+export async function exportFarvision(params = {}) {
+  const { data } = await api.get('/transactions/temp-trans/export-farvision', {
+    params,
+    responseType: 'blob',
+    timeout: IMPORT_TIMEOUT_MS,
+  })
+  return data
+}

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
-  setAllTempRowsLock,
+  setAllTempRowsLock, exportFarvision,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import {
   Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter, Lock, Unlock,
-  ShieldCheck,
+  ShieldCheck, FileSpreadsheet,
 } from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
@@ -149,6 +149,8 @@ export default function StagingPage() {
   const [bulkLock, setBulkLock] = useState(null)
   const [bulkLockBusy, setBulkLockBusy] = useState(false)
 
+  const [exportingFarvision, setExportingFarvision] = useState(false)
+
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
   useEffect(() => {
@@ -213,6 +215,30 @@ export default function StagingPage() {
     }
     return p
   }, [filters, query, conflictsOnly, checkedAccount])
+
+  // Exports exactly the rows the table is showing right now — same filters,
+  // same search, same "flagged rows only" narrowing as listParams() builds for
+  // the list itself, so filtering down to one batch or one account before
+  // exporting behaves the way it looks like it should.
+  const handleExportFarvision = async () => {
+    setExportingFarvision(true)
+    try {
+      const blob = await exportFarvision(listParams())
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `farvision_export_${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Farvision export downloaded')
+    } catch (err) {
+      toast.error(err.message || 'Export failed')
+    } finally {
+      setExportingFarvision(false)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -582,6 +608,15 @@ export default function StagingPage() {
             >
               <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
               Check Rules
+            </button>
+            <button
+              onClick={handleExportFarvision}
+              disabled={!summary?.staged_total || exportingFarvision}
+              title="Export the rows currently shown, in Farvision's column format"
+              className="btn-secondary btn-sm"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+              {exportingFarvision ? 'Exporting…' : 'Export Farvision'}
             </button>
             {canWrite && (
               <button
