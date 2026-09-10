@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
-  activateMasterEntry, importBeneficiaries, deleteAllBeneficiaries, fetchProjects,
+  activateMasterEntry, importBeneficiaries, deleteAllBeneficiaries,
+  importFarvisionAccounts, deleteAllFarvisionAccounts, fetchProjects,
 } from '../api/endpoints.js'
 import {
   Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, TableBusy, SkeletonRows,
@@ -27,6 +28,45 @@ const PAGE_SIZE = 25
 // that scoping prevents.
 const EXTERNAL_OPTION_SOURCES = {
   project: { fetch: fetchProjects, labelField: 'name' },
+}
+
+// Which sheet-import a tab's Import/Delete All buttons call. Keyed by the
+// master type rather than guessed from `config.importable`, so a third
+// importable type is a line here rather than a branch added to every handler
+// below. 'hasCrossCompany' turns on the cross-company question — only
+// beneficiary has a concept of "the same account under a different company".
+const IMPORTERS = {
+  beneficiary: {
+    importFn: importBeneficiaries, clearFn: deleteAllBeneficiaries,
+    hasCrossCompany: true,
+    previewColumns: [
+      ['Name', 'name'], ['Account', 'account_number'], ['IFSC', 'ifsc_code'],
+      ['Bank', 'bank_name'], ['Company', 'company'], ['Head 1', 'head1'],
+    ],
+    helpText: 'Needs a header row. Recognised: Beneficiary Name, Account Number, '
+             + 'IFSC Code, Bank Name, Company, Head 1–3, and RERA Head 1–3 / '
+             + 'TCP Head 1–3 when you add them.',
+    clearMessage: 'This removes every row in the table and cannot be undone. Anyone the '
+      + 'ledger has already booked against is archived instead of deleted, '
+      + 'because removing them would break those transactions. Staged rows '
+      + 'keep their data but lose the beneficiary and need it picked again.',
+  },
+  farvision_account: {
+    importFn: importFarvisionAccounts, clearFn: deleteAllFarvisionAccounts,
+    hasCrossCompany: false,
+    previewColumns: [
+      ['Account Head', 'account_head'], ['Parent', 'parent_account_head'],
+      ['Company', 'company'], ['Bank', 'bank_name'],
+      ['Business Unit', 'business_unit'], ['Payee', 'payee_name'],
+    ],
+    helpText: 'Needs a header row with Account Head at minimum. Recognised: Company, '
+             + 'Account Head, Parent Account Head, Document Type, Financial Year, '
+             + 'Bank Name, Deduction Type, Description, EntryTypes, Debit/Credit, '
+             + 'Payment Mode, Payee Name, Docno, Invoice No, Business Unit.',
+    clearMessage: 'This removes every row in the table and cannot be undone. Nothing '
+      + 'else in the app refers to these rows, so there is no archive case here '
+      + '— re-import the corrected sheet afterwards.',
+  },
 }
 
 const blankForm = (config) =>
@@ -246,13 +286,15 @@ export default function MasterDataPage() {
 
   // Picking a file runs the dry run immediately. Nothing is written, and it is
   // the only way to know whether the duplicate question even needs asking.
+  const importer = IMPORTERS[config?.key]
+
   const handleImportFile = async (file) => {
     setImportFile(file)
     setPreview(null)
-    if (!file) return
+    if (!file || !importer) return
     setImportBusy(true)
     try {
-      setPreview(await importBeneficiaries(file, false))
+      setPreview(await importer.importFn(file, false))
     } catch (err) {
       toast.error(err.message)
       setImportFile(null)
@@ -262,10 +304,12 @@ export default function MasterDataPage() {
   }
 
   const runImport = async () => {
+    if (!importer) return
     setImportBusy(true)
     try {
-      const result = await importBeneficiaries(
-        importFile, true, onDuplicate, onCrossCompany)
+      const result = importer.hasCrossCompany
+        ? await importer.importFn(importFile, true, onDuplicate, onCrossCompany)
+        : await importer.importFn(importFile, true, onDuplicate)
       const parts = [`${result.inserted} added`]
       if (result.updated) parts.push(`${result.updated} updated`)
       if (result.skipped) parts.push(`${result.skipped} skipped`)
@@ -281,9 +325,10 @@ export default function MasterDataPage() {
   }
 
   const runClearAll = async () => {
+    if (!importer) return
     setClearing(true)
     try {
-      const r = await deleteAllBeneficiaries()
+      const r = await importer.clearFn()
       const parts = [`${r.deleted} deleted`]
       // Only mentioned when it happened — most companies have no ledger rows
       // booked against a beneficiary, and a zero here is noise.
@@ -660,12 +705,7 @@ export default function MasterDataPage() {
         danger
         busy={clearing}
         title={`Delete all ${totalItems} ${config?.label?.toLowerCase() ?? ''} records?`}
-        message={
-          'This removes every row in the table and cannot be undone. Anyone the ' +
-          'ledger has already booked against is archived instead of deleted, ' +
-          'because removing them would break those transactions. Staged rows ' +
-          'keep their data but lose the beneficiary and need it picked again.'
-        }
+        message={importer?.clearMessage}
         confirmText={clearing ? 'Deleting...' : 'Delete all'}
       />
 
@@ -685,11 +725,7 @@ export default function MasterDataPage() {
               onChange={(e) => handleImportFile(e.target.files?.[0] || null)}
               className="input"
             />
-            <p className="text-xs text-slate-500 mt-1">
-              Needs a header row. Recognised: Beneficiary Name, Account Number,
-              IFSC Code, Bank Name, Company, Head 1–3, and RERA Head 1–3 /
-              TCP Head 1–3 when you add them.
-            </p>
+            <p className="text-xs text-slate-500 mt-1">{importer?.helpText}</p>
           </div>
 
           {importBusy && !preview && (
@@ -735,12 +771,12 @@ export default function MasterDataPage() {
                 </p>
               )}
 
-              {preview.preview?.length > 0 && (
+              {preview.preview?.length > 0 && importer && (
                 <div className="card p-0 overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
-                        {['Name', 'Account', 'IFSC', 'Bank', 'Company', 'Head 1'].map((h) => (
+                        {importer.previewColumns.map(([h]) => (
                           <th key={h} className="text-left px-3 py-2 font-medium">{h}</th>
                         ))}
                       </tr>
@@ -748,8 +784,7 @@ export default function MasterDataPage() {
                     <tbody>
                       {preview.preview.map((r, i) => (
                         <tr key={i} className="border-t border-slate-100">
-                          {['name', 'account_number', 'ifsc_code', 'bank_name',
-                            'company', 'head1'].map((k) => (
+                          {importer.previewColumns.map(([h, k]) => (
                             <td key={k} className="px-3 py-1.5 whitespace-nowrap">
                               {r[k] || <span className="text-slate-300">—</span>}
                             </td>
@@ -767,8 +802,9 @@ export default function MasterDataPage() {
                   <div className="text-sm font-medium">
                     {preview.duplicate_count} row
                     {preview.duplicate_count === 1 ? '' : 's'} already exist
-                    {preview.duplicate_count === 1 ? 's' : ''}, matched on account
-                    number. What should happen to them?
+                    {preview.duplicate_count === 1 ? 's' : ''}, matched on{' '}
+                    {importer?.hasCrossCompany ? 'account number' : 'Company + Account Head'}.
+                    {' '}What should happen to them?
                   </div>
                   {['skip', 'overwrite'].map((mode) => (
                     <label key={mode} className="flex items-start gap-2 text-sm">
@@ -793,7 +829,7 @@ export default function MasterDataPage() {
                   <ul className="text-xs text-slate-500 pl-1">
                     {preview.duplicates.map((d) => (
                       <li key={d.row}>
-                        Row {d.row}: {d.name} ({d.account_number || 'no account number'})
+                        Row {d.row}: {d.name} ({d.account_number || (importer?.hasCrossCompany ? 'no account number' : 'no company')})
                       </li>
                     ))}
                     {preview.duplicates_truncated && <li>…and more</li>}
@@ -804,7 +840,7 @@ export default function MasterDataPage() {
               {/* Same account number, different company. A separate question
                   from the duplicate one: these are not the same record, so
                   overwriting is not on the table — only whether they belong. */}
-              {preview.cross_company_count > 0 && (
+              {importer?.hasCrossCompany && preview.cross_company_count > 0 && (
                 <div className="card p-3 space-y-2">
                   <div className="text-sm font-medium">
                     {preview.cross_company_count} row
