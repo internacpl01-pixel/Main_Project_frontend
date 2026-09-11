@@ -297,6 +297,11 @@ export async function deleteAllFarvisionAccounts() {
   return data
 }
 
+export async function fetchFarvisionAccountReference() {
+  const { data } = await api.get('/master/farvision_account/reference')
+  return data
+}
+
 export async function updateMasterEntry(masterType, itemId, payload) {
   const { data } = await api.patch(`/master/${masterType}/${itemId}`, payload)
   return data

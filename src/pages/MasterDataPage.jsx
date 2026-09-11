@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchMasterSchema, fetchMasterData, createMasterEntry, updateMasterEntry, deleteMasterEntry,
   activateMasterEntry, importBeneficiaries, deleteAllBeneficiaries,
-  importFarvisionAccounts, deleteAllFarvisionAccounts, fetchProjects,
+  importFarvisionAccounts, deleteAllFarvisionAccounts, fetchFarvisionAccountReference, fetchProjects,
 } from '../api/endpoints.js'
 import {
   Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, TableBusy, SkeletonRows,
@@ -62,17 +62,16 @@ const FARVISION_ACCOUNT_IMPORTER = {
   hasCrossCompany: false,
   previewColumns: [
     ['Account Head', 'account_head'], ['Parent', 'parent_account_head'],
-    ['Bank', 'bank_name'], ['Business Unit', 'business_unit'],
-    ['Payee', 'payee_name'],
   ],
   helpText: 'Needs a header row with Company and Account Head at minimum. DPL rows '
-           + 'and AMB rows go to their own table automatically. Recognised: Company, '
-           + 'Account Head, Parent Account Head, Document Type, Financial Year, '
-           + 'Bank Name, Deduction Type, Description, EntryTypes, Debit/Credit, '
-           + 'Payment Mode, Payee Name, Docno, Invoice No, Business Unit.',
+           + 'and AMB rows go to their own table automatically. Only Company, Account '
+           + 'Head and Parent Account Head are stored — any other columns in the sheet '
+           + '(Financial Year, Bank Name, Deduction Type, etc.) are read but not saved; '
+           + 'see Reference values below for those.',
   clearMessage: 'This removes every row in both the DPL and AMB tables and cannot be '
     + 'undone. Nothing else in the app refers to these rows, so there is no archive '
     + 'case here — re-import the corrected sheet afterwards.',
+  referenceFetch: fetchFarvisionAccountReference,
 }
 IMPORTERS.farvision_account_dpl = FARVISION_ACCOUNT_IMPORTER
 IMPORTERS.farvision_account_amb = FARVISION_ACCOUNT_IMPORTER
@@ -119,6 +118,13 @@ export default function MasterDataPage() {
   // Emptying the beneficiary table archives everything the ledger has booked
   // against and unlinks the staged rows, so it is slow enough to need saying.
   const [clearing, setClearing] = useState(false)
+
+  // Read-only reference values (Financial Year format, Deduction Type options,
+  // etc.) for tabs whose importer declares one — fetched lazily on first open
+  // rather than on every tab switch, since it never changes within a session.
+  const [refOpen, setRefOpen] = useState(false)
+  const [refValues, setRefValues] = useState(null)
+  const [refLoading, setRefLoading] = useState(false)
 
   const config = schema.find((s) => s.key === masterType) || null
 
@@ -282,6 +288,8 @@ export default function MasterDataPage() {
     setSortBy(schema.find((s) => s.key === type)?.label_field || null)
     setSortDir('asc')
     setPage(1)
+    setRefOpen(false)
+    setRefValues(null)
   }
 
   const openImport = () => {
@@ -295,6 +303,24 @@ export default function MasterDataPage() {
   // Picking a file runs the dry run immediately. Nothing is written, and it is
   // the only way to know whether the duplicate question even needs asking.
   const importer = IMPORTERS[config?.key]
+
+  const toggleReference = async () => {
+    if (refOpen) {
+      setRefOpen(false)
+      return
+    }
+    setRefOpen(true)
+    if (refValues || !importer?.referenceFetch) return
+    setRefLoading(true)
+    try {
+      setRefValues(await importer.referenceFetch())
+    } catch (err) {
+      toast.error(err.message)
+      setRefOpen(false)
+    } finally {
+      setRefLoading(false)
+    }
+  }
 
   const handleImportFile = async (file) => {
     setImportFile(file)
@@ -519,6 +545,12 @@ export default function MasterDataPage() {
           <button onClick={load} disabled={loading} className="btn-secondary">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:[animation-duration:2s]' : ''}`} />
           </button>
+          {importer?.referenceFetch && (
+            <button onClick={toggleReference} className="btn-secondary">
+              Reference values
+              {refOpen ? <ChevronUp className="h-4 w-4 ml-1.5" /> : <ChevronDown className="h-4 w-4 ml-1.5" />}
+            </button>
+          )}
           {canWrite && config.importable && (
             <button onClick={openImport} className="btn-secondary">
               <Upload className="h-4 w-4 mr-1.5" />
@@ -541,6 +573,28 @@ export default function MasterDataPage() {
           )}
         </div>
       </div>
+
+      {refOpen && importer?.referenceFetch && (
+        <div className="card p-3 mb-4 space-y-2">
+          <p className="text-xs text-slate-500">
+            Format/examples found in the original master sheet for columns this table
+            doesn't store — not looked up during export, just shown for reference.
+          </p>
+          {refLoading ? (
+            <Spinner />
+          ) : (
+            <div className="space-y-2">
+              {(refValues || []).map((r) => (
+                <div key={r.field} className="text-sm">
+                  <span className="font-medium">{r.field}:</span>{' '}
+                  <span className="text-slate-600">{r.values.join(', ')}</span>
+                  {r.note && <div className="text-xs text-slate-400">{r.note}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       <div className="card">
