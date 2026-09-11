@@ -51,23 +51,31 @@ const IMPORTERS = {
       + 'because removing them would break those transactions. Staged rows '
       + 'keep their data but lose the beneficiary and need it picked again.',
   },
-  farvision_account: {
-    importFn: importFarvisionAccounts, clearFn: deleteAllFarvisionAccounts,
-    hasCrossCompany: false,
-    previewColumns: [
-      ['Account Head', 'account_head'], ['Parent', 'parent_account_head'],
-      ['Company', 'company'], ['Bank', 'bank_name'],
-      ['Business Unit', 'business_unit'], ['Payee', 'payee_name'],
-    ],
-    helpText: 'Needs a header row with Account Head at minimum. Recognised: Company, '
-             + 'Account Head, Parent Account Head, Document Type, Financial Year, '
-             + 'Bank Name, Deduction Type, Description, EntryTypes, Debit/Credit, '
-             + 'Payment Mode, Payee Name, Docno, Invoice No, Business Unit.',
-    clearMessage: 'This removes every row in the table and cannot be undone. Nothing '
-      + 'else in the app refers to these rows, so there is no archive case here '
-      + '— re-import the corrected sheet afterwards.',
-  },
 }
+
+// The Farvision chart of accounts is one sheet, one import button, but two
+// tables (DPL and AMB) -- the sheet's own Company column routes each row
+// server-side, so both tabs share the same import/clear calls rather than
+// needing a per-company upload.
+const FARVISION_ACCOUNT_IMPORTER = {
+  importFn: importFarvisionAccounts, clearFn: deleteAllFarvisionAccounts,
+  hasCrossCompany: false,
+  previewColumns: [
+    ['Account Head', 'account_head'], ['Parent', 'parent_account_head'],
+    ['Bank', 'bank_name'], ['Business Unit', 'business_unit'],
+    ['Payee', 'payee_name'],
+  ],
+  helpText: 'Needs a header row with Company and Account Head at minimum. DPL rows '
+           + 'and AMB rows go to their own table automatically. Recognised: Company, '
+           + 'Account Head, Parent Account Head, Document Type, Financial Year, '
+           + 'Bank Name, Deduction Type, Description, EntryTypes, Debit/Credit, '
+           + 'Payment Mode, Payee Name, Docno, Invoice No, Business Unit.',
+  clearMessage: 'This removes every row in both the DPL and AMB tables and cannot be '
+    + 'undone. Nothing else in the app refers to these rows, so there is no archive '
+    + 'case here — re-import the corrected sheet afterwards.',
+}
+IMPORTERS.farvision_account_dpl = FARVISION_ACCOUNT_IMPORTER
+IMPORTERS.farvision_account_amb = FARVISION_ACCOUNT_IMPORTER
 
 const blankForm = (config) =>
   Object.fromEntries((config?.fields || []).map((f) => [f.key, '']))
@@ -805,7 +813,7 @@ export default function MasterDataPage() {
                     {preview.duplicate_count} row
                     {preview.duplicate_count === 1 ? '' : 's'} already exist
                     {preview.duplicate_count === 1 ? 's' : ''}, matched on{' '}
-                    {importer?.hasCrossCompany ? 'account number' : 'Company + Account Head'}.
+                    {importer?.hasCrossCompany ? 'account number' : 'Account Head'}.
                     {' '}What should happen to them?
                   </div>
                   {['skip', 'overwrite'].map((mode) => (

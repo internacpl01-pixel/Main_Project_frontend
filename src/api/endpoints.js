@@ -281,11 +281,10 @@ export async function importBeneficiaries(
   return data
 }
 
-export async function importFarvisionAccounts(file, save = false, onDuplicate = 'skip') {
+export async function importFarvisionAccounts(file, save = false) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
-  form.append('on_duplicate', onDuplicate)
   const { data } = await api.post('/master/farvision_account/import', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
