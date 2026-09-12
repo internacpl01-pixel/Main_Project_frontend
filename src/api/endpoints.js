@@ -735,3 +735,15 @@ export async function exportFarvision(params = {}) {
   })
   return data
 }
+
+export async function fetchFarvisionVerifyRows(params = {}) {
+  const { data } = await api.get('/transactions/temp-trans/farvision-verify', { params })
+  return data
+}
+
+export async function resolveFarvisionVerifyRow(id, accountHead) {
+  const { data } = await api.post('/transactions/temp-trans/farvision-verify/resolve', {
+    id, account_head: accountHead,
+  })
+  return data
+}

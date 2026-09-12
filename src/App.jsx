@@ -11,6 +11,7 @@ import ChangeLogPage from './pages/ChangeLogPage.jsx'
 import MasterDataPage from './pages/MasterDataPage.jsx'
 import RulesPage from './pages/RulesPage.jsx'
 import StagingPage from './pages/StagingPage.jsx'
+import FarvisionVerifyPage from './pages/FarvisionVerifyPage.jsx'
 import LedgerPage from './pages/LedgerPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
 import ExportPage from './pages/ExportPage.jsx'
@@ -95,6 +96,10 @@ export default function App() {
         <Route path="rules" element={<CompanyRoute><RulesPage /></CompanyRoute>} />
         <Route path="import" element={<CompanyRoute><ImportPage /></CompanyRoute>} />
         <Route path="staging" element={<CompanyRoute><StagingPage /></CompanyRoute>} />
+        {/* Reached from Imported Rows' "Export Farvision" button (carrying its
+            current filters via navigation state), not typed directly -- it is
+            a review step in front of that export, not a standalone listing. */}
+        <Route path="farvision-verify" element={<CompanyRoute><FarvisionVerifyPage /></CompanyRoute>} />
         <Route path="ledger" element={<CompanyRoute><LedgerPage /></CompanyRoute>} />
         <Route path="export" element={<CompanyRoute><ExportPage /></CompanyRoute>} />
         <Route path="users" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><UsersPage /></LevelRoute></CompanyRoute>} />

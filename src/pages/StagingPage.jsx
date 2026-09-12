@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
-  setAllTempRowsLock, exportFarvision,
+  setAllTempRowsLock,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -44,6 +45,7 @@ const KEEP = '__keep__'
 
 export default function StagingPage() {
   const { canWrite } = useAuth()
+  const navigate = useNavigate()
   const [rows, setRows] = useState([])
   const [columns, setColumns] = useState([])
   // Unfiltered totals from the server — the tab filter must not change what
@@ -149,8 +151,6 @@ export default function StagingPage() {
   const [bulkLock, setBulkLock] = useState(null)
   const [bulkLockBusy, setBulkLockBusy] = useState(false)
 
-  const [exportingFarvision, setExportingFarvision] = useState(false)
-
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
   useEffect(() => {
@@ -216,28 +216,15 @@ export default function StagingPage() {
     return p
   }, [filters, query, conflictsOnly, checkedAccount])
 
-  // Exports exactly the rows the table is showing right now — same filters,
-  // same search, same "flagged rows only" narrowing as listParams() builds for
-  // the list itself, so filtering down to one batch or one account before
-  // exporting behaves the way it looks like it should.
-  const handleExportFarvision = async () => {
-    setExportingFarvision(true)
-    try {
-      const blob = await exportFarvision(listParams())
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `farvision_export_${new Date().toISOString().slice(0, 10)}.xlsx`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success('Farvision export downloaded')
-    } catch (err) {
-      toast.error(err.message || 'Export failed')
-    } finally {
-      setExportingFarvision(false)
-    }
+  // Goes to the Farvision Verify review step first, carrying exactly the
+  // filters the table is showing right now -- same filters, same search,
+  // same "flagged rows only" narrowing as listParams() builds for the list
+  // itself, so filtering down to one batch or one account before exporting
+  // still behaves the way it looks like it should. The download itself now
+  // happens from that page's own "Final Export Farvision" button, once any
+  // ambiguous Account Heads have been reviewed.
+  const handleExportFarvision = () => {
+    navigate('/farvision-verify', { state: { filters: listParams() } })
   }
 
   const load = useCallback(async () => {
@@ -611,12 +598,12 @@ export default function StagingPage() {
             </button>
             <button
               onClick={handleExportFarvision}
-              disabled={!summary?.staged_total || exportingFarvision}
-              title="Export the rows currently shown, in Farvision's column format"
+              disabled={!summary?.staged_total}
+              title="Review any ambiguous Account Heads, then export in Farvision's column format"
               className="btn-secondary btn-sm"
             >
               <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
-              {exportingFarvision ? 'Exporting…' : 'Export Farvision'}
+              Export Farvision
             </button>
             {canWrite && (
               <button

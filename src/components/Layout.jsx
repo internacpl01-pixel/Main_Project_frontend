@@ -3,7 +3,7 @@ import { useAuth, MANAGER, SUPER_ADMIN } from '../context/AuthContext.jsx'
 import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
-  FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck
+  FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck, ListChecks
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
@@ -40,6 +40,10 @@ const NAV = [
   { to: '/change-log', icon: History, label: 'Change Log', requiredLevel: MANAGER },
   { to: '/import', icon: Upload, label: 'Import Statement' },
   { to: '/staging', icon: FileSpreadsheet, label: 'Imported Rows' },
+  // Directly after Imported Rows: it is the review step in front of the
+  // Farvision export, reached normally via that button rather than typed
+  // directly, but kept in the nav so an in-progress review isn't lost.
+  { to: '/farvision-verify', icon: ListChecks, label: 'Farvision Verify' },
   // Directly after Imported Rows, because that is the journey: a row is
   // imported, classified, then posted here.
   { to: '/ledger', icon: BookOpen, label: 'Ledger' },
