@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { fetchFarvisionVerifyRows, resolveFarvisionVerifyRow, exportFarvision } from '../api/endpoints.js'
-import { Spinner, EmptyState } from '../components/UI.jsx'
+import { Spinner, EmptyState, SearchableSelect } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { Download, ArrowLeft, CheckCircle2, Check } from 'lucide-react'
@@ -215,19 +215,13 @@ export default function FarvisionVerifyPage() {
                               </div>
                             ) : showDropdown ? (
                               <div className="flex items-center gap-2">
-                                <select
-                                  className="input py-1 text-xs"
+                                <SearchableSelect
+                                  options={row.options}
                                   value=""
+                                  onChange={(opt) => handleResolve(row, opt)}
                                   disabled={state === 'saving'}
-                                  onChange={(e) => handleResolve(row, e.target.value)}
-                                >
-                                  <option value="" disabled>
-                                    {state === 'saving' ? 'Saving...' : 'Choose Account Head...'}
-                                  </option>
-                                  {row.options.map((opt) => (
-                                    <option key={opt} value={opt}>{opt}</option>
-                                  ))}
-                                </select>
+                                  placeholder={state === 'saving' ? 'Saving...' : 'Search Account Head...'}
+                                />
                                 {state === 'saving' && <Spinner size="sm" />}
                                 {typeof state === 'string' && state !== 'saving' && state !== 'saved' && (
                                   <span className="shrink-0 text-xs font-medium text-red-700" title={state}>

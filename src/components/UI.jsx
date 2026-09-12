@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
 // `tone` and not a colour in `className`: Tailwind emits its utilities in its
@@ -437,6 +437,77 @@ export function SearchInput({ value, onChange, placeholder, onClear, list }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+      )}
+    </div>
+  )
+}
+
+// A type-to-filter dropdown over a plain list of strings — for a picker
+// whose option list is too long to scan by eye (Farvision Verify's Account
+// Head, sometimes a handful of close matches, occasionally the whole
+// ~7,900-row master as a last resort). Selection-only, not free text: the
+// typed text is just a filter, and only clicking a listed option calls
+// onChange, so the result can never be a value that wasn't actually offered.
+// Rendered matches are capped so an empty filter over a huge list doesn't
+// put thousands of DOM nodes on the page at once.
+export function SearchableSelect({
+  options, value, onChange, placeholder = 'Search...', disabled = false, className = '',
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [open])
+
+  const filtered = (query
+    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    : options
+  ).slice(0, 200)
+
+  return (
+    <div className={`relative ${className}`} ref={ref}>
+      <input
+        type="text"
+        className="input py-1 text-xs"
+        placeholder={placeholder}
+        disabled={disabled}
+        value={open ? query : (value || '')}
+        onFocus={() => { setOpen(true); setQuery('') }}
+        onChange={(e) => { setOpen(true); setQuery(e.target.value) }}
+      />
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-56 w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-slate-400">No matches</p>
+          ) : (
+            filtered.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => { onChange(opt); setOpen(false); setQuery('') }}
+                className="block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-slate-50"
+                title={opt}
+              >
+                {opt}
+              </button>
+            ))
+          )}
+          {options.length > filtered.length && filtered.length === 200 && (
+            <p className="border-t border-slate-100 px-3 py-1.5 text-[10px] text-slate-400">
+              Showing first 200 matches — keep typing to narrow further.
+            </p>
+          )}
+        </div>
       )}
     </div>
   )
