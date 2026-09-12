@@ -4,13 +4,21 @@ import { fetchFarvisionVerifyRows, resolveFarvisionVerifyRow, exportFarvision } 
 import { Spinner, EmptyState } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check } from 'lucide-react'
 
 // Filters come from the Imported Rows page's own "Export Farvision" button, so
 // this review step looks at exactly the same rows that button used to export
 // directly -- confirmed with the user. Landing on this page with no filters
-// (e.g. a bookmarked URL) just reviews every ambiguous row across every batch,
-// the same way export-farvision itself falls back to no filter.
+// (e.g. a bookmarked URL) just reviews every row across every batch, the same
+// way export-farvision itself falls back to no filter.
+//
+// Every row is shown, matched or not -- the same shape as the Check Rules
+// dialog (confirmed with the user): a confident match is plain text with a
+// "Not correct?" override, a row with no confident match (blank, or a genuine
+// conflict between candidates) shows its dropdown immediately, and "Skip for
+// now" is always there to move on without deciding. Skipping only hides a
+// row's controls for this open page -- nothing is written, so it comes back
+// next visit exactly as it was.
 export default function FarvisionVerifyPage() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -18,8 +26,17 @@ export default function FarvisionVerifyPage() {
 
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
-  const [resolvingId, setResolvingId] = useState(null)
   const [exporting, setExporting] = useState(false)
+
+  // Per-row id: 'saving' | 'saved' | an error message. Drives the small
+  // status shown beside that row's dropdown once it's been touched.
+  const [rowState, setRowState] = useState({})
+  // Ids currently showing their override dropdown -- only ever matched rows;
+  // an unmatched row's dropdown is always shown, so it never needs this.
+  const [overriding, setOverriding] = useState(() => new Set())
+  // Ids marked "skip for now" -- client-only, undoable, never sent to the
+  // server.
+  const [skipped, setSkipped] = useState(() => new Set())
 
   const load = () => {
     setLoading(true)
@@ -34,19 +51,46 @@ export default function FarvisionVerifyPage() {
 
   const handleResolve = async (row, accountHead) => {
     if (!accountHead) return
-    setResolvingId(row.id)
+    setRowState((prev) => ({ ...prev, [row.id]: 'saving' }))
     try {
       await resolveFarvisionVerifyRow(row.id, accountHead)
-      // Resolved for good on the server -- it will not come back as
-      // ambiguous, so it drops off this review list rather than staying
-      // here showing its new value.
-      setRows((prev) => prev.filter((r) => r.id !== row.id))
-      toast.success('Account Head resolved')
+      // Written for good on the server -- reflected here too, so the row
+      // now reads as a plain matched row instead of staying in review mode.
+      setRows((prev) => prev.map((r) =>
+        r.id === row.id ? { ...r, account_head: accountHead, matched: true } : r))
+      setOverriding((prev) => {
+        const next = new Set(prev)
+        next.delete(row.id)
+        return next
+      })
+      setRowState((prev) => ({ ...prev, [row.id]: 'saved' }))
     } catch (err) {
-      toast.error(err.message || 'Could not save that choice')
-    } finally {
-      setResolvingId(null)
+      setRowState((prev) => ({ ...prev, [row.id]: err.message || 'Could not save' }))
     }
+  }
+
+  const handleSkip = (id) => {
+    setSkipped((prev) => new Set(prev).add(id))
+  }
+
+  const handleUnskip = (id) => {
+    setSkipped((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }
+
+  const revealOverride = (id) => {
+    setOverriding((prev) => new Set(prev).add(id))
+  }
+
+  const cancelOverride = (id) => {
+    setOverriding((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }
 
   const handleFinalExport = async () => {
@@ -69,11 +113,13 @@ export default function FarvisionVerifyPage() {
     }
   }
 
+  const needsReview = rows.filter((r) => !r.matched).length
+
   return (
     <div>
       <PageHeader
         title="Farvision Verify"
-        description="Rows whose Account Head is still ambiguous — pick the right one before the final export. Unresolved rows still export, just with Account Head blank."
+        description="Every row bound for the export, with its current Account Head. Review a match, fix a blank or conflicting one, or skip for now — unresolved rows still export, just with Account Head blank."
       />
 
       <div className="flex items-center justify-between mb-4">
@@ -90,14 +136,22 @@ export default function FarvisionVerifyPage() {
         </button>
       </div>
 
+      {!loading && rows.length > 0 && (
+        <p className="text-sm text-slate-500 mb-3">
+          {needsReview === 0
+            ? `All ${rows.length} rows have an Account Head.`
+            : `${needsReview} of ${rows.length} rows need a decision (blank or conflicting).`}
+        </p>
+      )}
+
       <div className="card">
         {loading ? (
           <div className="flex justify-center py-12"><Spinner /></div>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
-            title="Nothing to review"
-            description="No ambiguous Account Heads in this set — you're ready for the final export."
+            title="Nothing to export"
+            description="This filter has no staged rows."
           />
         ) : (
           <table className="w-full text-sm">
@@ -108,26 +162,93 @@ export default function FarvisionVerifyPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td className="px-4 py-3 text-slate-700">{row.narration}</td>
-                  <td className="px-4 py-3">
-                    <select
-                      className="input"
-                      value=""
-                      disabled={resolvingId === row.id}
-                      onChange={(e) => handleResolve(row, e.target.value)}
-                    >
-                      <option value="" disabled>
-                        {resolvingId === row.id ? 'Saving...' : 'Choose Account Head...'}
-                      </option>
-                      {row.options.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((row) => {
+                const state = rowState[row.id]
+                const isSkipped = skipped.has(row.id)
+                const isOverriding = overriding.has(row.id)
+                const showDropdown = !row.matched || isOverriding
+
+                return (
+                  <tr key={row.id} className={!row.matched && !isSkipped ? 'bg-amber-50' : ''}>
+                    <td className="px-4 py-3 text-slate-700 align-top">{row.narration}</td>
+                    <td className="px-4 py-3 align-top">
+                      {isSkipped ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">skipped for now</span>
+                          <button
+                            onClick={() => handleUnskip(row.id)}
+                            className="text-xs text-primary-600 hover:underline"
+                          >
+                            undo
+                          </button>
+                        </div>
+                      ) : showDropdown ? (
+                        <div className="flex items-center gap-2">
+                          <select
+                            className="input py-1 text-xs"
+                            value=""
+                            disabled={state === 'saving'}
+                            onChange={(e) => handleResolve(row, e.target.value)}
+                          >
+                            <option value="" disabled>
+                              {state === 'saving' ? 'Saving...' : 'Choose Account Head...'}
+                            </option>
+                            {row.options.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {state === 'saving' && <Spinner size="sm" />}
+                          {typeof state === 'string' && state !== 'saving' && state !== 'saved' && (
+                            <span className="shrink-0 text-xs font-medium text-red-700" title={state}>
+                              not saved
+                            </span>
+                          )}
+                          {isOverriding && (
+                            <button
+                              onClick={() => cancelOverride(row.id)}
+                              className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                            >
+                              cancel
+                            </button>
+                          )}
+                          {!isOverriding && (
+                            <button
+                              onClick={() => handleSkip(row.id)}
+                              title="Leave this row exactly as it is for now"
+                              className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                            >
+                              skip for now
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-700">{row.account_head}</span>
+                          {state === 'saved' && (
+                            <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
+                              <Check className="h-3.5 w-3.5 mr-0.5" /> saved
+                            </span>
+                          )}
+                          <button
+                            onClick={() => revealOverride(row.id)}
+                            title="Pick a different Account Head for this row"
+                            className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                          >
+                            Not correct?
+                          </button>
+                          <button
+                            onClick={() => handleSkip(row.id)}
+                            title="Leave this row exactly as it is for now"
+                            className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                          >
+                            skip for now
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
