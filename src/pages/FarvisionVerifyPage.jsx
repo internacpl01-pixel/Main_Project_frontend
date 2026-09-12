@@ -39,7 +39,9 @@ export default function FarvisionVerifyPage() {
   const [columns, setColumns] = useState([])
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
+  // null, or which kind is currently downloading -- so each button shows its
+  // own spinner instead of both greying out for one export.
+  const [exporting, setExporting] = useState(null)
 
   // Per-row id: 'saving' | 'saved' | an error message. Drives the small
   // status shown beside that row's dropdown once it's been touched.
@@ -109,23 +111,26 @@ export default function FarvisionVerifyPage() {
     })
   }
 
-  const handleFinalExport = async () => {
-    setExporting(true)
+  // Two separate workbooks over the same reviewed set, confirmed with the
+  // user: Receipt Payment (Document Type "Payment/Reciept") and Deposit
+  // Withdrawal (Document Type "Deposit/withdrawal") never share a file.
+  const handleFinalExport = async (kind, label) => {
+    setExporting(kind)
     try {
-      const blob = await exportFarvision(filters)
+      const blob = await exportFarvision(kind, filters)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `farvision_export_${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.download = `farvision_${kind}_${new Date().toISOString().slice(0, 10)}.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      toast.success('Farvision export downloaded')
+      toast.success(`${label} export downloaded`)
     } catch (err) {
       toast.error(err.message || 'Export failed')
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
@@ -143,13 +148,30 @@ export default function FarvisionVerifyPage() {
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back to Imported Rows
         </button>
-        <button onClick={handleFinalExport} disabled={exporting} className="btn-primary">
-          {exporting ? (
-            <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
-          ) : (
-            <><Download className="h-4 w-4 mr-2" /> Final Export Farvision</>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleFinalExport('receipt_payment', 'Receipt Payment')}
+            disabled={!!exporting}
+            className="btn-primary"
+          >
+            {exporting === 'receipt_payment' ? (
+              <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
+            ) : (
+              <><Download className="h-4 w-4 mr-2" /> Export Receipt Payment</>
+            )}
+          </button>
+          <button
+            onClick={() => handleFinalExport('deposit_withdrawal', 'Deposit Withdrawal')}
+            disabled={!!exporting}
+            className="btn-primary"
+          >
+            {exporting === 'deposit_withdrawal' ? (
+              <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
+            ) : (
+              <><Download className="h-4 w-4 mr-2" /> Export Deposit Withdrawal</>
+            )}
+          </button>
+        </div>
       </div>
 
       {!loading && rows.length > 0 && (
