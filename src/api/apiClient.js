@@ -168,8 +168,15 @@ api.interceptors.response.use(
  * silently for endpoints nobody audited would risk showing stale data after
  * a save. Call sites opt in explicitly (see fetchMasterData/fetchFieldMap
  * below) and their matching create/update/delete calls call invalidateCache.
+ *
+ * An hour, not 30 seconds, matching services/farvision.py's own cache: the
+ * real defense against stale data is invalidateCache() firing immediately on
+ * every write, not this TTL -- a save is visible on the very next request
+ * either way. The TTL is only the fallback for a write that reaches these
+ * tables some other way, which is rare enough that an hour is an acceptable
+ * worst case here too.
  */
-const CACHE_TTL_MS = 30000
+const CACHE_TTL_MS = 60 * 60 * 1000
 const _cache = new Map()
 
 export async function cachedGet(url, params = {}) {
