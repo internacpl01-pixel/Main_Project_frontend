@@ -1,4 +1,4 @@
-import { api } from './apiClient.js'
+import { api, cachedGet, invalidateCache } from './apiClient.js'
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -168,8 +168,7 @@ export async function deleteProject(projectId) {
 // Page alias names: fetchFieldMappings, createFieldMapping, updateFieldMapping, deleteFieldMapping
 
 export async function fetchFieldMap() {
-  const { data } = await api.get('/fieldmap/')
-  return data
+  return cachedGet('/fieldmap/')
 }
 export const fetchFieldMappings = fetchFieldMap
 
@@ -181,12 +180,14 @@ export const fetchFieldMappings = fetchFieldMap
 
 export async function updateFieldMapEntry(fieldmapId, payload) {
   const { data } = await api.patch(`/fieldmap/${fieldmapId}`, payload)
+  invalidateCache('/fieldmap/')
   return data
 }
 export const updateFieldMapping = updateFieldMapEntry
 
 export async function deleteFieldMapEntry(fieldmapId) {
   const { data } = await api.delete(`/fieldmap/${fieldmapId}`)
+  invalidateCache('/fieldmap/')
   return data
 }
 export const deleteFieldMapping = deleteFieldMapEntry
@@ -211,6 +212,7 @@ export async function createCustomField(type, displayname = '', mapfields = '', 
   // The column name is generated server-side (field_num_1, ...) because it is
   // interpolated into ALTER TABLE. Only the label is yours to choose.
   const { data } = await api.post('/custom-fields/', { type, displayname, mapfields, method })
+  invalidateCache('/fieldmap/')
   return data
 }
 
@@ -220,6 +222,7 @@ export async function deleteCustomFieldById(fieldmapId) {
   // not save it — the server decodes %2F back to / before routing, so the
   // request 404s on a field that is plainly on screen.
   const { data } = await api.delete(`/custom-fields/by-id/${fieldmapId}`)
+  invalidateCache('/fieldmap/')
   return data
 }
 
@@ -227,6 +230,7 @@ export async function deleteCustomField(fieldname) {
   // By name. Only reaches a field whose name is a legal column name; used for
   // an orphaned column that has no fieldmap row, and so has no id.
   const { data } = await api.delete(`/custom-fields/${encodeURIComponent(fieldname)}`)
+  invalidateCache('/fieldmap/')
   return data
 }
 
@@ -246,12 +250,12 @@ export async function fetchMasterSchema() {
 }
 
 export async function fetchMasterData(masterType, params = {}) {
-  const { data } = await api.get(`/master/${masterType}`, { params })
-  return data
+  return cachedGet(`/master/${masterType}`, params)
 }
 
 export async function createMasterEntry(masterType, payload) {
   const { data } = await api.post(`/master/${masterType}`, payload)
+  invalidateCache(`/master/${masterType}`)
   return data
 }
 
@@ -260,6 +264,7 @@ export async function createMasterEntry(masterType, payload) {
 // matches on those, so a corrected sheet would be refused as duplicates.
 export async function deleteAllBeneficiaries() {
   const { data } = await api.delete('/master/beneficiary/all')
+  invalidateCache('/master/beneficiary')
   return data
 }
 
@@ -278,6 +283,7 @@ export async function importBeneficiaries(
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
   })
+  if (save) invalidateCache('/master/beneficiary')
   return data
 }
 
@@ -289,11 +295,17 @@ export async function importFarvisionAccounts(file, save = false) {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
   })
+  if (save) {
+    invalidateCache('/master/farvision_account_dpl')
+    invalidateCache('/master/farvision_account_amb')
+  }
   return data
 }
 
 export async function deleteAllFarvisionAccounts() {
   const { data } = await api.delete('/master/farvision_account/all')
+  invalidateCache('/master/farvision_account_dpl')
+  invalidateCache('/master/farvision_account_amb')
   return data
 }
 
@@ -304,17 +316,20 @@ export async function fetchFarvisionAccountReference() {
 
 export async function updateMasterEntry(masterType, itemId, payload) {
   const { data } = await api.patch(`/master/${masterType}/${itemId}`, payload)
+  invalidateCache(`/master/${masterType}`)
   return data
 }
 
 export async function deleteMasterEntry(masterType, itemId, permanent = false) {
   const { data } = await api.delete(
     `/master/${masterType}/${itemId}`, { params: { permanent } })
+  invalidateCache(`/master/${masterType}`)
   return data
 }
 
 export async function activateMasterEntry(masterType, itemId) {
   const { data } = await api.post(`/master/${masterType}/${itemId}/activate`)
+  invalidateCache(`/master/${masterType}`)
   return data
 }
 

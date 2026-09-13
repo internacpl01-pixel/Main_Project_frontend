@@ -155,4 +155,43 @@ api.interceptors.response.use(
   }
 )
 
+/**
+ * A short-lived cache for GET requests that reload the same data over and
+ * over with no cache at all -- master data, field mappings -- which meant
+ * switching tabs or navigating back to a page always re-fetched, even when
+ * nothing had changed. Plain Map, keyed by URL + params: one process, one
+ * page, a handful of distinct keys (a few master types, one fieldmap list) --
+ * the same reasoning as the backend's own dict cache in services/farvision.py.
+ *
+ * Deliberately NOT wired into every GET automatically: a cache is only
+ * correct where the caller also invalidates it on write, and doing that
+ * silently for endpoints nobody audited would risk showing stale data after
+ * a save. Call sites opt in explicitly (see fetchMasterData/fetchFieldMap
+ * below) and their matching create/update/delete calls call invalidateCache.
+ */
+const CACHE_TTL_MS = 30000
+const _cache = new Map()
+
+export async function cachedGet(url, params = {}) {
+  const key = `${url}?${JSON.stringify(params)}`
+  const hit = _cache.get(key)
+  if (hit && Date.now() - hit.time < CACHE_TTL_MS) {
+    return hit.data
+  }
+  const { data } = await api.get(url, { params })
+  _cache.set(key, { time: Date.now(), data })
+  return data
+}
+
+// Drops every cached entry whose URL starts with `prefix`. Params aren't part
+// of the match — a write under /master/bank should invalidate every cached
+// page/filter of /master/bank, not just the one the write happened to be near.
+export function invalidateCache(prefix) {
+  for (const key of _cache.keys()) {
+    if (key.startsWith(`${prefix}?`) || key === prefix) {
+      _cache.delete(key)
+    }
+  }
+}
+
 export default api
