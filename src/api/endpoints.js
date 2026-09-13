@@ -204,8 +204,7 @@ export async function fetchFieldChangeLog(params = {}) {
 // an existing column is recognised — it never changes the table.
 
 export async function fetchCustomFields() {
-  const { data } = await api.get('/custom-fields/')
-  return data
+  return cachedGet('/custom-fields/')
 }
 
 export async function createCustomField(type, displayname = '', mapfields = '', method = '') {
@@ -213,6 +212,7 @@ export async function createCustomField(type, displayname = '', mapfields = '', 
   // interpolated into ALTER TABLE. Only the label is yours to choose.
   const { data } = await api.post('/custom-fields/', { type, displayname, mapfields, method })
   invalidateCache('/fieldmap/')
+  invalidateCache('/custom-fields/')
   return data
 }
 
@@ -223,6 +223,7 @@ export async function deleteCustomFieldById(fieldmapId) {
   // request 404s on a field that is plainly on screen.
   const { data } = await api.delete(`/custom-fields/by-id/${fieldmapId}`)
   invalidateCache('/fieldmap/')
+  invalidateCache('/custom-fields/')
   return data
 }
 
@@ -231,6 +232,7 @@ export async function deleteCustomField(fieldname) {
   // an orphaned column that has no fieldmap row, and so has no id.
   const { data } = await api.delete(`/custom-fields/${encodeURIComponent(fieldname)}`)
   invalidateCache('/fieldmap/')
+  invalidateCache('/custom-fields/')
   return data
 }
 
