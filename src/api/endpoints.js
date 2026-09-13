@@ -751,6 +751,34 @@ export async function exportFarvision(kind, params = {}) {
   return data
 }
 
+// Runs the same export as a background job (services/jobs.py -- the same
+// registry PDF import already uses) instead of holding the request open for
+// the whole build. Resolves with a ready-to-download Blob and the filename
+// the server chose; pollImportJob already knows how to follow any job in the
+// shared registry, not just an import, since jobs.get() doesn't care who
+// created the job.
+export async function startFarvisionExportJob(kind, params = {}) {
+  const { data } = await api.get('/transactions/temp-trans/export-farvision', {
+    params: { kind, background: true, ...params },
+  })
+  return data.job_id
+}
+
+function xlsxBlobFromBase64(base64) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+}
+
+export async function exportFarvisionViaJob(kind, params = {}, onProgress) {
+  const jobId = await startFarvisionExportJob(kind, params)
+  const result = await pollImportJob(jobId, onProgress)
+  return { blob: xlsxBlobFromBase64(result.content_b64), filename: result.filename }
+}
+
 export async function fetchFarvisionVerifyRows(params = {}) {
   const { data } = await api.get('/transactions/temp-trans/farvision-verify', { params })
   return data

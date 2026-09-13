@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { fetchFarvisionVerifyRows, resolveFarvisionVerifyRow, exportFarvision } from '../api/endpoints.js'
+import { fetchFarvisionVerifyRows, resolveFarvisionVerifyRow, exportFarvisionViaJob } from '../api/endpoints.js'
 import { Spinner, EmptyState, SearchableSelect } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
@@ -42,6 +42,10 @@ export default function FarvisionVerifyPage() {
   // null, or which kind is currently downloading -- so each button shows its
   // own spinner instead of both greying out for one export.
   const [exporting, setExporting] = useState(null)
+  // The running job's own status line (services/jobs.py's `message`), shown
+  // beside the spinner instead of a bare "Exporting..." that says nothing for
+  // however long the job takes.
+  const [exportMessage, setExportMessage] = useState('')
 
   // Per-row id: 'saving' | 'saved' | an error message. Drives the small
   // status shown beside that row's dropdown once it's been touched.
@@ -114,14 +118,25 @@ export default function FarvisionVerifyPage() {
   // Two separate workbooks over the same reviewed set, confirmed with the
   // user: Receipt Payment (Document Type "Payment/Reciept") and Deposit
   // Withdrawal (Document Type "Deposit/withdrawal") never share a file.
+  //
+  // Runs as a background job (services/jobs.py) rather than holding one
+  // request open for the whole build -- the same mechanism PDF import
+  // already uses, so a large batch no longer ties up a connection/worker for
+  // however long matching every row takes. The button's own experience is
+  // unchanged: still one click, still a spinner, still an automatic
+  // download when it's ready -- only the label under the spinner now
+  // reflects the job's own status instead of a bare "Exporting...".
   const handleFinalExport = async (kind, label) => {
     setExporting(kind)
+    setExportMessage('Starting...')
     try {
-      const blob = await exportFarvision(kind, filters)
+      const { blob, filename } = await exportFarvisionViaJob(kind, filters, (job) => {
+        setExportMessage(job.message || 'Working...')
+      })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `farvision_${kind}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.download = filename || `farvision_${kind}_${new Date().toISOString().slice(0, 10)}.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -131,6 +146,7 @@ export default function FarvisionVerifyPage() {
       toast.error(err.message || 'Export failed')
     } finally {
       setExporting(null)
+      setExportMessage('')
     }
   }
 
@@ -155,7 +171,7 @@ export default function FarvisionVerifyPage() {
             className="btn-primary"
           >
             {exporting === 'receipt_payment' ? (
-              <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
+              <><Spinner size="sm" tone="white" className="mr-2" /> {exportMessage || 'Exporting...'}</>
             ) : (
               <><Download className="h-4 w-4 mr-2" /> Export Receipt Payment</>
             )}
@@ -166,7 +182,7 @@ export default function FarvisionVerifyPage() {
             className="btn-primary"
           >
             {exporting === 'deposit_withdrawal' ? (
-              <><Spinner size="sm" tone="white" className="mr-2" /> Exporting...</>
+              <><Spinner size="sm" tone="white" className="mr-2" /> {exportMessage || 'Exporting...'}</>
             ) : (
               <><Download className="h-4 w-4 mr-2" /> Export Deposit Withdrawal</>
             )}
