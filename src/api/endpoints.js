@@ -661,6 +661,20 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
   }
 }
 
+// Starts importing every un-marked file in the one configured Google Drive
+// folder, all under the same bank account (auto-detecting a file's own bank
+// is a separate, deferred feature). Always runs as a background job --
+// resolves with the job id; follow it with pollImportJob, whose result is
+// { files: [{name, status, row_count | error}], imported, failed }.
+export async function startDriveImportJob(bankId) {
+  const form = new FormData()
+  form.append('bank_id', String(bankId))
+  const { data } = await api.post('/imports/from-drive', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data.job_id
+}
+
 // What is in a workbook, before anything is imported. Returns
 // { sheets: [{ name, rows, data_rows, header_row, headers_detected,
 //              unmapped_headers, is_statement, reason, sample,

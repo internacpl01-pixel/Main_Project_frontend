@@ -2,14 +2,14 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
-  pollImportJob,
+  pollImportJob, startDriveImportJob,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers,
+  Layers, HardDrive,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -98,6 +98,27 @@ export default function ImportPage() {
   const [workbook, setWorkbook] = useState(null)
   const [inspecting, setInspecting] = useState(false)
   const [chosenSheets, setChosenSheets] = useState([])
+  // Picking more than one file at once switches into batch mode instead of
+  // the single-file flow above: one shared Bank Account, no per-file
+  // password/page-range/sheet-picker (a workbook's sheets default to "every
+  // statement sheet" -- importExcel already does that when `sheets` is
+  // blank), imported one at a time so progress and duplicate detection stay
+  // exactly as reliable as a single upload. A password-protected PDF or a
+  // workbook needing specific sheets chosen is still imported individually
+  // through the flow above.
+  const [batchFiles, setBatchFiles] = useState([])
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchIndex, setBatchIndex] = useState(0)
+  const [batchResults, setBatchResults] = useState([])
+  // Which source the picker is showing -- 'computer' is everything above,
+  // 'drive' imports whatever the Gmail Apps Script has already copied into
+  // the one configured Drive folder. Every file in a Drive run shares the
+  // same Bank Account (the bankId state above) -- deciding which bank a
+  // given file belongs to on its own is a separate, deferred feature.
+  const [source, setSource] = useState('computer')
+  const [driveRunning, setDriveRunning] = useState(false)
+  const [driveMessage, setDriveMessage] = useState('')
+  const [driveResults, setDriveResults] = useState(null)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -151,6 +172,90 @@ export default function ImportPage() {
     }
   }, [])
 
+  // Entry point for both the click-to-browse input and drag-drop -- one file
+  // goes to the existing single-file flow untouched; more than one switches
+  // to batch mode.
+  const handleFileSelection = (selected) => {
+    const list = Array.from(selected || [])
+    if (list.length === 0) return
+    if (list.length === 1) {
+      setBatchFiles([]); setBatchResults([])
+      handleFile(list[0])
+      return
+    }
+    const valid = []
+    for (const f of list) {
+      if (f.size > 25 * 1024 * 1024) { toast.error(`${f.name}: too large (max 25 MB)`); continue }
+      const ext = f.name.split('.').pop().toLowerCase()
+      if (!['pdf', 'csv', 'xls', 'xlsx'].includes(ext)) {
+        toast.error(`${f.name}: unsupported format`); continue
+      }
+      valid.push(f)
+    }
+    if (valid.length === 0) return
+    setFile(null); setResult(null)
+    setBatchFiles(valid)
+    setBatchResults([])
+  }
+
+  const handleImportBatch = async () => {
+    setBatchRunning(true)
+    const results = []
+    for (let i = 0; i < batchFiles.length; i++) {
+      const f = batchFiles[i]
+      setBatchIndex(i + 1)
+      setProgress(null)
+      setUploadPct(0)
+      try {
+        const res = await importFile(f, bankId || null, '', '', null, setProgress, '',
+                                     (pct) => setUploadPct(pct >= 100 ? null : pct))
+        results.push({ name: f.name, status: res.row_count > 0 ? 'done' : 'empty',
+                      rowCount: res.row_count })
+      } catch (err) {
+        results.push({ name: f.name, status: 'failed', error: err.message })
+      } finally {
+        setProgress(null); setUploadPct(null)
+      }
+    }
+    setBatchResults(results)
+    setBatchRunning(false)
+    const failedCount = results.filter((r) => r.status === 'failed').length
+    const totalRows = results.reduce((s, r) => s + (r.rowCount || 0), 0)
+    if (failedCount === 0) toast.success(`Imported ${totalRows} rows from ${results.length} files`)
+    else toast.error(`${failedCount} of ${results.length} files failed to import`)
+  }
+
+  const resetBatch = () => {
+    setBatchFiles([]); setBatchResults([]); setBatchRunning(false); setBatchIndex(0)
+  }
+
+  const handleImportFromDrive = async () => {
+    if (!bankId) { toast.error('Pick a bank account first.'); return }
+    setDriveRunning(true)
+    setDriveMessage('Starting...')
+    setDriveResults(null)
+    try {
+      const jobId = await startDriveImportJob(bankId)
+      const res = await pollImportJob(jobId, (job) => setDriveMessage(job.message || 'Working...'))
+      setDriveResults(res)
+      const totalRows = (res.files || []).reduce((s, f) => s + (f.row_count || 0), 0)
+      if (res.failed === 0) {
+        toast.success(res.imported > 0
+          ? `Imported ${totalRows} rows from ${res.imported} files`
+          : 'Nothing new to import — every file in Drive is already marked done.')
+      } else {
+        toast.error(`${res.failed} of ${res.files.length} files failed to import`)
+      }
+    } catch (err) {
+      toast.error(err.message || 'Drive import failed')
+    } finally {
+      setDriveRunning(false)
+      setDriveMessage('')
+    }
+  }
+
+  const resetDrive = () => { setDriveResults(null) }
+
   const toggleSheet = (name) => {
     setChosenSheets((prev) => prev.includes(name)
       ? prev.filter((n) => n !== name)
@@ -158,7 +263,7 @@ export default function ImportPage() {
   }
 
   const handleDrop = (e) => {
-    e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0])
+    e.preventDefault(); setDragOver(false); handleFileSelection(e.dataTransfer.files)
   }
 
   const handleImport = async () => {
@@ -250,10 +355,33 @@ export default function ImportPage() {
   const partialFill = Object.entries(result?.fill_rates || {})
     .filter(([, v]) => v.total > 0 && v.filled < v.total)
 
+  // Nothing picked, running, or showing a result in any of the three modes --
+  // the point at which it's meaningful to switch which source you're using.
+  const idle = !file && !result && batchFiles.length === 0
+    && batchResults.length === 0 && !driveRunning && !driveResults
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* --- Which source ------------------------------------------------- */}
+      {idle && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSource('computer')}
+            className={source === 'computer' ? 'btn-primary' : 'btn-secondary'}
+          >
+            <Upload className="h-4 w-4 mr-1.5" />Import from Computer
+          </button>
+          <button
+            onClick={() => setSource('drive')}
+            className={source === 'drive' ? 'btn-primary' : 'btn-secondary'}
+          >
+            <HardDrive className="h-4 w-4 mr-1.5" />Import from Drive
+          </button>
+        </div>
+      )}
+
       {/* --- Pick a file ------------------------------------------------- */}
-      {!file && !result && (
+      {source === 'computer' && !file && !result && batchFiles.length === 0 && batchResults.length === 0 && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
@@ -272,14 +400,113 @@ export default function ImportPage() {
               <Upload className="h-7 w-7" />
             </div>
             <p className="text-base font-medium text-slate-900">Drop your statement here</p>
-            <p className="text-sm text-slate-500 mt-1">or click to browse</p>
+            <p className="text-sm text-slate-500 mt-1">
+              or click to browse — select multiple files to import them all at once
+            </p>
             <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-full text-xs text-slate-500">
-              <FileText className="h-3.5 w-3.5" />PDF, CSV, XLS, XLSX — max 25 MB
+              <FileText className="h-3.5 w-3.5" />PDF, CSV, XLS, XLSX — max 25 MB each
             </div>
             <input
-              ref={fileInput} type="file" accept=".pdf,.csv,.xls,.xlsx"
-              onChange={(e) => handleFile(e.target.files[0])} className="hidden"
+              ref={fileInput} type="file" accept=".pdf,.csv,.xls,.xlsx" multiple
+              onChange={(e) => handleFileSelection(e.target.files)} className="hidden"
             />
+          </div>
+        </div>
+      )}
+
+      {/* --- Import from Drive --------------------------------------------- */}
+      {source === 'drive' && !driveResults && (
+        <div className="card">
+          <div className="card-body">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="h-10 w-10 rounded-lg bg-primary-100 text-primary-600 flex items-center justify-center">
+                <HardDrive className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-900">
+                  Import from the connected Drive folder
+                </p>
+                <p className="text-xs text-slate-500">
+                  Every file a Gmail Apps Script has already copied there, not
+                  yet marked done.
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label className="label">Bank Account</label>
+              <select
+                value={bankId} onChange={(e) => setBankId(e.target.value)}
+                disabled={driveRunning} className="input"
+              >
+                <option value="">
+                  {banks.length === 0 ? 'No bank accounts in Master Data yet' : 'Choose an account'}
+                </option>
+                {banks.map((b) => (
+                  <option key={b.id} value={b.id} disabled={!b.is_active}>
+                    {b.account_number ? `${b.bank_name} — ${b.account_number}` : b.bank_name}
+                    {!b.is_active ? ' (deactivated)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-400">
+                Applied to every file this run finds in Drive — deciding which
+                bank a file belongs to on its own isn't built yet, so pick the
+                account every file in the folder right now actually belongs to.
+              </p>
+            </div>
+
+            <div className="flex justify-center">
+              <button onClick={handleImportFromDrive} disabled={driveRunning} className="btn-primary">
+                {driveRunning ? (
+                  <><Spinner size="sm" tone="white" className="mr-2" />{driveMessage || 'Working...'}</>
+                ) : (
+                  <><HardDrive className="h-4 w-4 mr-1.5" />Import from Drive</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Drive import result -------------------------------------------- */}
+      {driveResults && (
+        <div className="card">
+          <div className="card-body">
+            <h2 className="text-base font-semibold text-slate-900 mb-4">
+              {driveResults.imported > 0 ? 'Drive import complete' : 'Nothing to import'}
+            </h2>
+            {(driveResults.files || []).length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Every file in the Drive folder is already marked done.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {driveResults.files.map((f, i) => (
+                  <div key={f.name + i} className="flex items-center justify-between px-3 py-2.5 text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      {f.status === 'failed' ? (
+                        <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                      ) : f.status === 'skipped' ? (
+                        <Info className="h-4 w-4 text-slate-400 shrink-0" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                      )}
+                      <span className="truncate text-slate-700">{f.name}</span>
+                    </span>
+                    <span className="text-xs text-slate-500 shrink-0 ml-2">
+                      {f.status === 'done' ? `${f.row_count} rows` : f.error}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-6 flex items-center gap-3">
+              <button onClick={() => navigate('/staging')} className="btn-primary">
+                View Imported Rows
+              </button>
+              <button onClick={resetDrive} className="btn-secondary">Check Drive Again</button>
+            </div>
           </div>
         </div>
       )}
@@ -539,6 +766,121 @@ export default function ImportPage() {
                   <><Upload className="h-4 w-4 mr-1.5" />Upload and Import</>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Batch mode: more than one file selected ----------------------- */}
+      {batchFiles.length > 0 && batchResults.length === 0 && (
+        <div className="card">
+          <div className="card-body">
+            <div className="flex items-center justify-between mb-6">
+              <p className="text-sm font-medium text-slate-900">
+                {batchFiles.length} files selected
+              </p>
+              <button
+                onClick={resetBatch}
+                disabled={batchRunning}
+                className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mb-5">
+              <label className="label">Bank Account</label>
+              <select
+                value={bankId} onChange={(e) => setBankId(e.target.value)}
+                disabled={batchRunning} className="input"
+              >
+                <option value="">
+                  {banks.length === 0 ? 'No bank accounts in Master Data yet' : 'Not specified'}
+                </option>
+                {banks.map((b) => (
+                  <option key={b.id} value={b.id} disabled={!b.is_active}>
+                    {b.account_number ? `${b.bank_name} — ${b.account_number}` : b.bank_name}
+                    {!b.is_active ? ' (deactivated)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-400">
+                Applied to every file in this batch — each is imported one at a
+                time under this same account. A password-protected PDF, a
+                specific page range, or picking only some of a workbook's
+                sheets is only available importing one file at a time; a
+                workbook here imports every sheet that looks like a statement.
+              </p>
+            </div>
+
+            <div className="mb-6 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {batchFiles.map((f, i) => (
+                <div key={f.name + i} className="flex items-center justify-between px-3 py-2.5 text-sm">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <File className="h-4 w-4 text-slate-400 shrink-0" />
+                    <span className="truncate text-slate-700">{f.name}</span>
+                  </span>
+                  {batchRunning && (
+                    batchIndex - 1 > i ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                    ) : batchIndex - 1 === i ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <span className="text-xs text-slate-400 shrink-0">Waiting</span>
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-center">
+              <button onClick={handleImportBatch} disabled={batchRunning} className="btn-primary">
+                {batchRunning ? (
+                  <>
+                    <Spinner size="sm" tone="white" className="mr-2" />
+                    File {batchIndex}/{batchFiles.length}
+                    {progress
+                      ? ` · ${progress.percent}%`
+                      : uploadPct !== null ? ` · Uploading ${uploadPct}%` : ''}
+                  </>
+                ) : (
+                  <><Upload className="h-4 w-4 mr-1.5" />Import {batchFiles.length} Files</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Batch mode result ---------------------------------------------- */}
+      {batchResults.length > 0 && (
+        <div className="card">
+          <div className="card-body">
+            <h2 className="text-base font-semibold text-slate-900 mb-4">Batch import complete</h2>
+            <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {batchResults.map((r, i) => (
+                <div key={r.name + i} className="flex items-center justify-between px-3 py-2.5 text-sm">
+                  <span className="flex items-center gap-2 min-w-0">
+                    {r.status === 'failed' ? (
+                      <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    ) : r.status === 'empty' ? (
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                    ) : (
+                      <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                    )}
+                    <span className="truncate text-slate-700">{r.name}</span>
+                  </span>
+                  <span className="text-xs text-slate-500 shrink-0 ml-2">
+                    {r.status === 'failed' ? r.error : `${r.rowCount} rows`}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex items-center gap-3">
+              <button onClick={() => navigate('/staging')} className="btn-primary">
+                View Imported Rows
+              </button>
+              <button onClick={resetBatch} className="btn-secondary">Import More Files</button>
             </div>
           </div>
         </div>
