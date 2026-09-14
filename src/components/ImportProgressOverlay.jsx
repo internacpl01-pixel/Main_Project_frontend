@@ -42,18 +42,24 @@ const VISIBLE_ROWS = 3
  * described while it is running — dropping the line the moment it finished
  * would shorten the list under the user and jerk everything up a row.
  */
-function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe }) {
+function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep }) {
   const state = progress?.state
   const steps = []
 
   // 1 — the browser's half of the wait. Measured here, not reported: until the
   // last byte lands the server has nothing to say about this file at all.
-  steps.push({
-    key: 'upload',
-    label: `Uploading ${fileName}`,
-    status: uploadPct !== null ? 'active' : 'done',
-    percent: uploadPct !== null ? uploadPct : null,
-  })
+  // Skipped entirely for a run whose files never passed through the browser
+  // at all (Drive import pulls them server-side) -- showing "Uploading..."
+  // for something that never uploaded would be a step that isn't real, which
+  // is the one thing this list promises not to have.
+  if (!skipUploadStep) {
+    steps.push({
+      key: 'upload',
+      label: `Uploading ${fileName}`,
+      status: uploadPct !== null ? 'active' : 'done',
+      percent: uploadPct !== null ? uploadPct : null,
+    })
+  }
 
   // 2 — the file has arrived and the job exists, but the parse has not begun.
   // Usually a blink; on a busy server it is where the time goes, and a blank
@@ -155,7 +161,7 @@ function StepMark({ status }) {
 }
 
 export default function ImportProgressOverlay({
-  open, fileName, uploadPct, progress, stepWord = 'Batch',
+  open, fileName, uploadPct, progress, stepWord = 'Batch', skipUploadStep = false,
 }) {
   // The header-page read, remembered once seen — see buildSteps.
   const [sawProbe, setSawProbe] = useState(false)
@@ -184,7 +190,7 @@ export default function ImportProgressOverlay({
 
   if (!open) return null
 
-  const steps = buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe })
+  const steps = buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep })
   const activeIndex = Math.max(0, steps.findIndex((s) => s.status === 'active'))
   const offset = -(activeIndex - ACTIVE_SLOT) * ROW_HEIGHT
 

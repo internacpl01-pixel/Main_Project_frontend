@@ -117,7 +117,6 @@ export default function ImportPage() {
   // given file belongs to on its own is a separate, deferred feature.
   const [source, setSource] = useState('computer')
   const [driveRunning, setDriveRunning] = useState(false)
-  const [driveMessage, setDriveMessage] = useState('')
   const [driveResults, setDriveResults] = useState(null)
   const fileInput = useRef()
   const navigate = useNavigate()
@@ -242,12 +241,17 @@ export default function ImportPage() {
     if (specError) { toast.error(specError); return }
 
     setDriveRunning(true)
-    setDriveMessage('Starting...')
+    setProgress(null)
     setDriveResults(null)
     try {
       const jobId = await startDriveImportJob(
         pages.trim(), batchPages.trim() === '' ? null : Number(batchPages))
-      const res = await pollImportJob(jobId, (job) => setDriveMessage(job.message || 'Working...'))
+      // Reuses the same `progress` state the single-file and batch flows
+      // already drive ImportProgressOverlay from -- a Drive run reports
+      // itself in the exact same step shape (one step per file here, the
+      // same way one step is one workbook sheet), so the same overlay shows
+      // it with no separate progress plumbing.
+      const res = await pollImportJob(jobId, setProgress)
       setDriveResults(res)
       const totalRows = (res.files || []).reduce((s, f) => s + (f.row_count || 0), 0)
       if (res.failed === 0) {
@@ -261,7 +265,7 @@ export default function ImportPage() {
       toast.error(err.message || 'Drive import failed')
     } finally {
       setDriveRunning(false)
-      setDriveMessage('')
+      setProgress(null)
     }
   }
 
@@ -510,7 +514,7 @@ export default function ImportPage() {
                 className="btn-primary"
               >
                 {driveRunning ? (
-                  <><Spinner size="sm" tone="white" className="mr-2" />{driveMessage || 'Working...'}</>
+                  <><Spinner size="sm" tone="white" className="mr-2" />{progress?.message || 'Working...'}</>
                 ) : (
                   <><HardDrive className="h-4 w-4 mr-1.5" />Import from Drive</>
                 )}
@@ -1192,13 +1196,18 @@ export default function ImportPage() {
       )}
 
       {/* Covers the window for the whole import. Every line in it is a phase
-          the server has actually reported — see the component. */}
+          the server has actually reported — see the component. Shared with
+          Drive import: a Drive run's job reports one step per file, in the
+          exact shape the overlay already reads a workbook's one-step-per-sheet
+          progress from -- skipUploadStep drops the browser-upload line, which
+          isn't real for files that came from Drive rather than this tab. */}
       <ImportProgressOverlay
-        open={importing}
-        fileName={file?.name || ''}
-        uploadPct={uploadPct}
+        open={importing || driveRunning}
+        fileName={driveRunning ? 'Drive folder' : (file?.name || '')}
+        uploadPct={driveRunning ? null : uploadPct}
         progress={progress}
-        stepWord={stepWord}
+        stepWord={driveRunning ? 'File' : stepWord}
+        skipUploadStep={driveRunning}
       />
     </div>
   )
