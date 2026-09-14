@@ -230,12 +230,11 @@ export default function ImportPage() {
   }
 
   const handleImportFromDrive = async () => {
-    if (!bankId) { toast.error('Pick a bank account first.'); return }
     setDriveRunning(true)
     setDriveMessage('Starting...')
     setDriveResults(null)
     try {
-      const jobId = await startDriveImportJob(bankId)
+      const jobId = await startDriveImportJob()
       const res = await pollImportJob(jobId, (job) => setDriveMessage(job.message || 'Working...'))
       setDriveResults(res)
       const totalRows = (res.files || []).reduce((s, f) => s + (f.row_count || 0), 0)
@@ -428,32 +427,11 @@ export default function ImportPage() {
                 </p>
                 <p className="text-xs text-slate-500">
                   Every file a Gmail Apps Script has already copied there, not
-                  yet marked done.
+                  yet marked done. No bank account is attached to these rows —
+                  classify them on the Imported Rows page afterward, the same
+                  as any row a plain upload left unassigned.
                 </p>
               </div>
-            </div>
-
-            <div className="mb-5">
-              <label className="label">Bank Account</label>
-              <select
-                value={bankId} onChange={(e) => setBankId(e.target.value)}
-                disabled={driveRunning} className="input"
-              >
-                <option value="">
-                  {banks.length === 0 ? 'No bank accounts in Master Data yet' : 'Choose an account'}
-                </option>
-                {banks.map((b) => (
-                  <option key={b.id} value={b.id} disabled={!b.is_active}>
-                    {b.account_number ? `${b.bank_name} — ${b.account_number}` : b.bank_name}
-                    {!b.is_active ? ' (deactivated)' : ''}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-400">
-                Applied to every file this run finds in Drive — deciding which
-                bank a file belongs to on its own isn't built yet, so pick the
-                account every file in the folder right now actually belongs to.
-              </p>
             </div>
 
             <div className="flex justify-center">
