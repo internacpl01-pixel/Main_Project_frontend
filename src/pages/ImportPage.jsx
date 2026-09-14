@@ -199,6 +199,9 @@ export default function ImportPage() {
   }
 
   const handleImportBatch = async () => {
+    const specError = pageSpecError(pages)
+    if (specError) { toast.error(specError); return }
+
     setBatchRunning(true)
     const results = []
     for (let i = 0; i < batchFiles.length; i++) {
@@ -207,7 +210,12 @@ export default function ImportPage() {
       setProgress(null)
       setUploadPct(0)
       try {
-        const res = await importFile(f, bankId || null, '', '', null, setProgress, '',
+        // Pages/batch-pages are PDF-only settings, same as the single-file
+        // form -- importFile itself ignores them for an Excel/CSV file in
+        // this same batch, so nothing extra is needed to scope that here.
+        const res = await importFile(f, bankId || null, '', pages.trim(),
+                                     batchPages.trim() === '' ? null : Number(batchPages),
+                                     setProgress, '',
                                      (pct) => setUploadPct(pct >= 100 ? null : pct))
         results.push({ name: f.name, status: res.row_count > 0 ? 'done' : 'empty',
                       rowCount: res.row_count })
@@ -230,11 +238,15 @@ export default function ImportPage() {
   }
 
   const handleImportFromDrive = async () => {
+    const specError = pageSpecError(pages)
+    if (specError) { toast.error(specError); return }
+
     setDriveRunning(true)
     setDriveMessage('Starting...')
     setDriveResults(null)
     try {
-      const jobId = await startDriveImportJob()
+      const jobId = await startDriveImportJob(
+        pages.trim(), batchPages.trim() === '' ? null : Number(batchPages))
       const res = await pollImportJob(jobId, (job) => setDriveMessage(job.message || 'Working...'))
       setDriveResults(res)
       const totalRows = (res.files || []).reduce((s, f) => s + (f.row_count || 0), 0)
@@ -434,8 +446,69 @@ export default function ImportPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              <div className="sm:col-span-2">
+                <label className="label">
+                  Pages to read (PDFs in this run){' '}
+                  <span className="text-slate-400 font-normal">(blank = the whole file)</span>
+                </label>
+                <input
+                  value={pages}
+                  onChange={(e) => setPages(e.target.value)}
+                  disabled={driveRunning}
+                  autoComplete="off"
+                  placeholder="All pages — or 30 for the first 30, or 31-65 for a range"
+                  className={`input ${pageSpecErrorText ? 'border-red-300 focus:ring-red-200' : ''}`}
+                />
+                {pageSpecErrorText ? (
+                  <p className="mt-1 text-xs text-red-600 flex items-start gap-1">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />{pageSpecErrorText}
+                  </p>
+                ) : rangeStartsLate ? (
+                  <p className="mt-1 text-xs text-slate-500 flex items-start gap-1">
+                    <Info className="h-3.5 w-3.5 shrink-0 mt-px text-slate-400" />
+                    Page 1 will be read as well on every PDF this run finds —
+                    it carries the column header, and the pages after it do
+                    not.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Applied to every PDF this run finds — an Excel or CSV file
+                    in the same run ignores this.
+                  </p>
+                )}
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="label">
+                  Read in batches of{' '}
+                  <span className="text-slate-400 font-normal">
+                    (blank = 20 pages, the recommended setting)
+                  </span>
+                </label>
+                <input
+                  value={batchPages}
+                  onChange={(e) => setBatchPages(e.target.value.replace(/[^\d]/g, ''))}
+                  disabled={driveRunning}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="20"
+                  className="input"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  A long PDF is read a stretch at a time and stitched back
+                  into one import. Enter <span className="font-mono">0</span>{' '}
+                  to read it in one pass.
+                </p>
+              </div>
+            </div>
+
             <div className="flex justify-center">
-              <button onClick={handleImportFromDrive} disabled={driveRunning} className="btn-primary">
+              <button
+                onClick={handleImportFromDrive}
+                disabled={driveRunning || !!pageSpecErrorText}
+                className="btn-primary"
+              >
                 {driveRunning ? (
                   <><Spinner size="sm" tone="white" className="mr-2" />{driveMessage || 'Working...'}</>
                 ) : (
@@ -784,11 +857,68 @@ export default function ImportPage() {
               </select>
               <p className="mt-1 text-xs text-slate-400">
                 Applied to every file in this batch — each is imported one at a
-                time under this same account. A password-protected PDF, a
-                specific page range, or picking only some of a workbook's
-                sheets is only available importing one file at a time; a
-                workbook here imports every sheet that looks like a statement.
+                time under this same account. A password-protected PDF, or
+                picking only some of a workbook's sheets, is only available
+                importing one file at a time; a workbook here imports every
+                sheet that looks like a statement.
               </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              <div className="sm:col-span-2">
+                <label className="label">
+                  Pages to read (PDFs in this batch){' '}
+                  <span className="text-slate-400 font-normal">(blank = the whole file)</span>
+                </label>
+                <input
+                  value={pages}
+                  onChange={(e) => setPages(e.target.value)}
+                  disabled={batchRunning}
+                  autoComplete="off"
+                  placeholder="All pages — or 30 for the first 30, or 31-65 for a range"
+                  className={`input ${pageSpecErrorText ? 'border-red-300 focus:ring-red-200' : ''}`}
+                />
+                {pageSpecErrorText ? (
+                  <p className="mt-1 text-xs text-red-600 flex items-start gap-1">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />{pageSpecErrorText}
+                  </p>
+                ) : rangeStartsLate ? (
+                  <p className="mt-1 text-xs text-slate-500 flex items-start gap-1">
+                    <Info className="h-3.5 w-3.5 shrink-0 mt-px text-slate-400" />
+                    Page 1 will be read as well on every PDF in this batch —
+                    it carries the column header, and the pages after it do
+                    not.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Applied to every PDF in this batch — an Excel or CSV file
+                    in the same batch ignores this.
+                  </p>
+                )}
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="label">
+                  Read in batches of{' '}
+                  <span className="text-slate-400 font-normal">
+                    (blank = 20 pages, the recommended setting)
+                  </span>
+                </label>
+                <input
+                  value={batchPages}
+                  onChange={(e) => setBatchPages(e.target.value.replace(/[^\d]/g, ''))}
+                  disabled={batchRunning}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="20"
+                  className="input"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  A long PDF is read a stretch at a time and stitched back
+                  into one import. Enter <span className="font-mono">0</span>{' '}
+                  to read it in one pass.
+                </p>
+              </div>
             </div>
 
             <div className="mb-6 divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -812,7 +942,11 @@ export default function ImportPage() {
             </div>
 
             <div className="flex justify-center">
-              <button onClick={handleImportBatch} disabled={batchRunning} className="btn-primary">
+              <button
+                onClick={handleImportBatch}
+                disabled={batchRunning || !!pageSpecErrorText}
+                className="btn-primary"
+              >
                 {batchRunning ? (
                   <>
                     <Spinner size="sm" tone="white" className="mr-2" />

@@ -665,11 +665,19 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
 // folder. No bank account is attached to these rows -- confirmed with the
 // user: picking one account for every file in the folder isn't wanted, and
 // auto-detecting a file's own bank is a separate, still-deferred feature.
-// Always runs as a background job -- resolves with the job id; follow it
-// with pollImportJob, whose result is
+// pages/batchPages are the same PDF page-range and batch-size controls a
+// single-file PDF import takes, applied here to every PDF the run finds
+// (Excel/CSV files in the same run ignore them, same as the single-file
+// form). Always runs as a background job -- resolves with the job id;
+// follow it with pollImportJob, whose result is
 // { files: [{name, status, row_count | error}], imported, failed }.
-export async function startDriveImportJob() {
-  const { data } = await api.post('/imports/from-drive', new FormData())
+export async function startDriveImportJob(pages = '', batchPages = null) {
+  const form = new FormData()
+  if (pages) form.append('pages', pages)
+  if (batchPages !== null && batchPages !== '') {
+    form.append('batch_pages', String(batchPages))
+  }
+  const { data } = await api.post('/imports/from-drive', form)
   return data.job_id
 }
 
