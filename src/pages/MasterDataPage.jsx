@@ -11,7 +11,7 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { Plus, Pencil, Trash2, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
+import { Plus, Pencil, Trash2, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Upload, AlertTriangle, Eye, EyeOff } from 'lucide-react'
 
 // The tab list, the table columns and the add/edit form all come from
 // GET /master/_schema. This page used to carry its own copy of the backend's
@@ -99,6 +99,11 @@ export default function MasterDataPage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [togglingId, setTogglingId] = useState(null)
+  // Which masked cells are currently shown in the clear, keyed by
+  // "itemId:fieldKey" so two different masked fields on the same row (or the
+  // same field across rows) toggle independently. Client-only and never
+  // persisted -- switching tabs or reloading goes back to hidden.
+  const [revealedCells, setRevealedCells] = useState(() => new Set())
 
   // Rows of every master type some field on this tab draws its options from,
   // keyed by that type. Beneficiary's nine head fields are the only user today.
@@ -656,17 +661,41 @@ export default function MasterDataPage() {
                       <td className="px-6 py-3 text-xs text-slate-400 font-mono">
                         {(page - 1) * PAGE_SIZE + idx + 1}
                       </td>
-                      {config.fields.map((field) => (
-                        <td key={field.key} className="px-6 py-3 text-sm text-slate-700 max-w-xs truncate">
-                          {/* Masking is UI hygiene, not a security boundary the
-                              API enforces -- this table cell just doesn't
-                              print the raw value where anyone glancing at the
-                              screen would see it. */}
-                          {field.masked
-                            ? (item[field.key] ? '••••••••' : '—')
-                            : (item[field.key] || '—')}
-                        </td>
-                      ))}
+                      {config.fields.map((field) => {
+                        const cellKey = `${item.id}:${field.key}`
+                        const revealed = revealedCells.has(cellKey)
+                        return (
+                          <td key={field.key} className="px-6 py-3 text-sm text-slate-700 max-w-xs truncate">
+                            {/* Masking is UI hygiene, not a security boundary
+                                the API enforces -- the eye button just lets
+                                someone who already has this page open confirm
+                                the value without going into Edit for it. */}
+                            {field.masked ? (
+                              item[field.key] ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span className={revealed ? 'font-mono' : ''}>
+                                    {revealed ? item[field.key] : '••••••••'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRevealedCells((prev) => {
+                                      const next = new Set(prev)
+                                      next.has(cellKey) ? next.delete(cellKey) : next.add(cellKey)
+                                      return next
+                                    })}
+                                    title={revealed ? 'Hide' : 'Show'}
+                                    className="shrink-0 p-0.5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                  >
+                                    {revealed
+                                      ? <EyeOff className="h-3.5 w-3.5" />
+                                      : <Eye className="h-3.5 w-3.5" />}
+                                  </button>
+                                </span>
+                              ) : '—'
+                            ) : (item[field.key] || '—')}
+                          </td>
+                        )
+                      })}
                       <td className="px-4 py-3 text-center">
                         {canWrite ? (
                           <button
