@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
-  pollImportJob, startDriveImportJob,
+  pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -110,14 +110,20 @@ export default function ImportPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchIndex, setBatchIndex] = useState(0)
   const [batchResults, setBatchResults] = useState([])
+  // A failed batch row's own password box -- keyed by the file's index in
+  // batchFiles, since more than one row could need one at once.
+  // { [index]: { value, busy } }
+  const [batchPwRetry, setBatchPwRetry] = useState({})
   // Which source the picker is showing -- 'computer' is everything above,
   // 'drive' imports whatever the Gmail Apps Script has already copied into
-  // the one configured Drive folder. Every file in a Drive run shares the
-  // same Bank Account (the bankId state above) -- deciding which bank a
-  // given file belongs to on its own is a separate, deferred feature.
+  // the one configured Drive folder. Which bank a Drive file belongs to is
+  // read off its own filename and matched server-side -- nothing chosen here.
   const [source, setSource] = useState('computer')
   const [driveRunning, setDriveRunning] = useState(false)
   const [driveResults, setDriveResults] = useState(null)
+  // A "password_required" Drive row's own password box, keyed by filename.
+  // { [name]: { value, busy } }
+  const [drivePwRetry, setDrivePwRetry] = useState({})
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -219,7 +225,15 @@ export default function ImportPage() {
         results.push({ name: f.name, status: res.row_count > 0 ? 'done' : 'empty',
                       rowCount: res.row_count })
       } catch (err) {
-        results.push({ name: f.name, status: 'failed', error: err.message })
+        // A bank with a saved password is already tried automatically (see
+        // process_pdf_import) before this is ever reached -- so a password
+        // problem surfacing here means it was missing or wrong, and this
+        // file specifically needs one typed in by hand, not a hard failure.
+        results.push({
+          name: f.name,
+          status: isPasswordProblem(err.message) ? 'password_required' : 'failed',
+          error: err.message,
+        })
       } finally {
         setProgress(null); setUploadPct(null)
       }
@@ -227,13 +241,47 @@ export default function ImportPage() {
     setBatchResults(results)
     setBatchRunning(false)
     const failedCount = results.filter((r) => r.status === 'failed').length
+    const pwCount = results.filter((r) => r.status === 'password_required').length
     const totalRows = results.reduce((s, r) => s + (r.rowCount || 0), 0)
-    if (failedCount === 0) toast.success(`Imported ${totalRows} rows from ${results.length} files`)
-    else toast.error(`${failedCount} of ${results.length} files failed to import`)
+    if (failedCount === 0 && pwCount === 0) {
+      toast.success(`Imported ${totalRows} rows from ${results.length} files`)
+    } else {
+      const parts = []
+      if (failedCount) parts.push(`${failedCount} failed`)
+      if (pwCount) parts.push(`${pwCount} need a password`)
+      toast.error(`${parts.join(', ')} of ${results.length} files`)
+    }
+  }
+
+  // Retries one batch row that needs a password typed in by hand, using the
+  // File object already held in batchFiles -- its bytes never left the
+  // browser, so no backend lookup is needed the way Drive's retry needs one.
+  const handleBatchRetryPassword = async (index) => {
+    const entry = batchPwRetry[index]
+    if (!entry?.value) return
+    const f = batchFiles[index]
+    setBatchPwRetry((prev) => ({ ...prev, [index]: { ...prev[index], busy: true } }))
+    try {
+      const res = await importFile(f, bankId || null, entry.value, pages.trim(),
+                                   batchPages.trim() === '' ? null : Number(batchPages),
+                                   null, '', null)
+      setBatchResults((prev) => prev.map((r, i) => i === index
+        ? { ...r, status: res.row_count > 0 ? 'done' : 'empty', rowCount: res.row_count, error: undefined }
+        : r))
+      setBatchPwRetry((prev) => {
+        const next = { ...prev }; delete next[index]; return next
+      })
+      toast.success(`Imported ${res.row_count} rows`)
+    } catch (err) {
+      setBatchPwRetry((prev) => ({
+        ...prev, [index]: { ...prev[index], busy: false, error: err.message },
+      }))
+    }
   }
 
   const resetBatch = () => {
     setBatchFiles([]); setBatchResults([]); setBatchRunning(false); setBatchIndex(0)
+    setBatchPwRetry({})
   }
 
   const handleImportFromDrive = async () => {
@@ -254,12 +302,15 @@ export default function ImportPage() {
       const res = await pollImportJob(jobId, setProgress)
       setDriveResults(res)
       const totalRows = (res.files || []).reduce((s, f) => s + (f.row_count || 0), 0)
-      if (res.failed === 0) {
+      if (res.failed === 0 && !res.needs_password) {
         toast.success(res.imported > 0
           ? `Imported ${totalRows} rows from ${res.imported} files`
           : 'Nothing new to import — every file in Drive is already marked done.')
       } else {
-        toast.error(`${res.failed} of ${res.files.length} files failed to import`)
+        const parts = []
+        if (res.failed) parts.push(`${res.failed} failed`)
+        if (res.needs_password) parts.push(`${res.needs_password} need a password`)
+        toast.error(`${parts.join(', ')} of ${res.files.length} files`)
       }
     } catch (err) {
       toast.error(err.message || 'Drive import failed')
@@ -269,7 +320,35 @@ export default function ImportPage() {
     }
   }
 
-  const resetDrive = () => { setDriveResults(null) }
+  const resetDrive = () => { setDriveResults(null); setDrivePwRetry({}) }
+
+  // Retries the one Drive file that needs a password typed in by hand --
+  // fileName is its CURRENT name (already carrying "_needs_password"), which
+  // is what proves the backend already matched it to a bank once.
+  const handleDriveRetryPassword = async (fileName) => {
+    const entry = drivePwRetry[fileName]
+    if (!entry?.value) return
+    setDrivePwRetry((prev) => ({ ...prev, [fileName]: { ...prev[fileName], busy: true } }))
+    try {
+      const res = await retryDriveFileWithPassword(fileName, entry.value)
+      setDriveResults((prev) => ({
+        ...prev,
+        imported: prev.imported + 1,
+        needs_password: Math.max(0, (prev.needs_password || 0) - 1),
+        files: prev.files.map((f) => f.name === fileName
+          ? { ...f, status: 'done', row_count: res.row_count, error: undefined }
+          : f),
+      }))
+      setDrivePwRetry((prev) => {
+        const next = { ...prev }; delete next[fileName]; return next
+      })
+      toast.success(`Imported ${res.row_count} rows`)
+    } catch (err) {
+      setDrivePwRetry((prev) => ({
+        ...prev, [fileName]: { ...prev[fileName], busy: false, error: err.message },
+      }))
+    }
+  }
 
   const toggleSheet = (name) => {
     setChosenSheets((prev) => prev.includes(name)
@@ -537,23 +616,56 @@ export default function ImportPage() {
               </p>
             ) : (
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {driveResults.files.map((f, i) => (
-                  <div key={f.name + i} className="flex items-center justify-between px-3 py-2.5 text-sm">
-                    <span className="flex items-center gap-2 min-w-0">
-                      {f.status === 'failed' ? (
-                        <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                      ) : f.status === 'skipped' ? (
-                        <Info className="h-4 w-4 text-slate-400 shrink-0" />
-                      ) : (
-                        <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                {driveResults.files.map((f, i) => {
+                  const retry = drivePwRetry[f.name]
+                  return (
+                    <div key={f.name + i} className="px-3 py-2.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 min-w-0">
+                          {f.status === 'failed' ? (
+                            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                          ) : f.status === 'password_required' ? (
+                            <Lock className="h-4 w-4 text-amber-500 shrink-0" />
+                          ) : f.status === 'skipped' ? (
+                            <Info className="h-4 w-4 text-slate-400 shrink-0" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                          )}
+                          <span className="truncate text-slate-700">{f.name}</span>
+                        </span>
+                        <span className="text-xs text-slate-500 shrink-0 ml-2">
+                          {f.status === 'done' ? `${f.row_count} rows` : f.error}
+                        </span>
+                      </div>
+                      {f.status === 'password_required' && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="w-56">
+                            <PasswordInput
+                              value={retry?.value || ''}
+                              onChange={(v) => setDrivePwRetry((prev) => (
+                                { ...prev, [f.name]: { ...prev[f.name], value: v, error: null } }
+                              ))}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleDriveRetryPassword(f.name) }}
+                              placeholder="Password for this file"
+                              autoComplete="off"
+                              invalid={!!retry?.error}
+                            />
+                          </div>
+                          <button
+                            onClick={() => handleDriveRetryPassword(f.name)}
+                            disabled={!retry?.value || retry?.busy}
+                            className="btn-secondary text-xs shrink-0"
+                          >
+                            {retry?.busy ? <Spinner size="sm" /> : 'Retry'}
+                          </button>
+                          {retry?.error && (
+                            <span className="text-xs text-red-600">{retry.error}</span>
+                          )}
+                        </div>
                       )}
-                      <span className="truncate text-slate-700">{f.name}</span>
-                    </span>
-                    <span className="text-xs text-slate-500 shrink-0 ml-2">
-                      {f.status === 'done' ? `${f.row_count} rows` : f.error}
-                    </span>
-                  </div>
-                ))}
+                    </div>
+                  )
+                })}
               </div>
             )}
             <div className="mt-6 flex items-center gap-3">
@@ -974,23 +1086,57 @@ export default function ImportPage() {
           <div className="card-body">
             <h2 className="text-base font-semibold text-slate-900 mb-4">Batch import complete</h2>
             <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {batchResults.map((r, i) => (
-                <div key={r.name + i} className="flex items-center justify-between px-3 py-2.5 text-sm">
-                  <span className="flex items-center gap-2 min-w-0">
-                    {r.status === 'failed' ? (
-                      <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                    ) : r.status === 'empty' ? (
-                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                    ) : (
-                      <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+              {batchResults.map((r, i) => {
+                const retry = batchPwRetry[i]
+                return (
+                  <div key={r.name + i} className="px-3 py-2.5 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 min-w-0">
+                        {r.status === 'failed' ? (
+                          <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                        ) : r.status === 'password_required' ? (
+                          <Lock className="h-4 w-4 text-amber-500 shrink-0" />
+                        ) : r.status === 'empty' ? (
+                          <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                        )}
+                        <span className="truncate text-slate-700">{r.name}</span>
+                      </span>
+                      <span className="text-xs text-slate-500 shrink-0 ml-2">
+                        {r.status === 'failed' || r.status === 'password_required'
+                          ? r.error : `${r.rowCount} rows`}
+                      </span>
+                    </div>
+                    {r.status === 'password_required' && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="w-56">
+                          <PasswordInput
+                            value={retry?.value || ''}
+                            onChange={(v) => setBatchPwRetry((prev) => (
+                              { ...prev, [i]: { ...prev[i], value: v, error: null } }
+                            ))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleBatchRetryPassword(i) }}
+                            placeholder="Password for this file"
+                            autoComplete="off"
+                            invalid={!!retry?.error}
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleBatchRetryPassword(i)}
+                          disabled={!retry?.value || retry?.busy}
+                          className="btn-secondary text-xs shrink-0"
+                        >
+                          {retry?.busy ? <Spinner size="sm" /> : 'Retry'}
+                        </button>
+                        {retry?.error && (
+                          <span className="text-xs text-red-600">{retry.error}</span>
+                        )}
+                      </div>
                     )}
-                    <span className="truncate text-slate-700">{r.name}</span>
-                  </span>
-                  <span className="text-xs text-slate-500 shrink-0 ml-2">
-                    {r.status === 'failed' ? r.error : `${r.rowCount} rows`}
-                  </span>
-                </div>
-              ))}
+                  </div>
+                )
+              })}
             </div>
             <div className="mt-6 flex items-center gap-3">
               <button onClick={() => navigate('/staging')} className="btn-primary">
