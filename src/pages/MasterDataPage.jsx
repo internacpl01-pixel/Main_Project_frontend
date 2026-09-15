@@ -6,6 +6,7 @@ import {
 } from '../api/endpoints.js'
 import {
   Modal, Spinner, EmptyState, ConfirmDialog, SearchInput, TableBusy, SkeletonRows,
+  PasswordInput,
 } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -657,7 +658,13 @@ export default function MasterDataPage() {
                       </td>
                       {config.fields.map((field) => (
                         <td key={field.key} className="px-6 py-3 text-sm text-slate-700 max-w-xs truncate">
-                          {item[field.key] || '—'}
+                          {/* Masking is UI hygiene, not a security boundary the
+                              API enforces -- this table cell just doesn't
+                              print the raw value where anyone glancing at the
+                              screen would see it. */}
+                          {field.masked
+                            ? (item[field.key] ? '••••••••' : '—')
+                            : (item[field.key] || '—')}
                         </td>
                       ))}
                       <td className="px-4 py-3 text-center">
@@ -1023,6 +1030,13 @@ export default function MasterDataPage() {
                   <option value="">Select...</option>
                   {field.options?.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
+              ) : field.masked ? (
+                <PasswordInput
+                  value={form[field.key] || ''}
+                  onChange={(v) => setForm({ ...form, [field.key]: v })}
+                  placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+                  autoComplete="off"
+                />
               ) : (
                 <input
                   value={form[field.key] || ''}
