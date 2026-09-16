@@ -333,7 +333,11 @@ export default function ImportPage() {
     try {
       const names = await listDriveFiles()
       setPickerFiles(names)
-      setPickerSelected(new Set(names))   // select all by default
+      // Tracked by position, not name -- Drive can (and, before the retry
+      // fix, did) hold two files with the identical name, and a Set of
+      // names would silently collapse those into one, leaving "select all"
+      // permanently unable to show as fully checked.
+      setPickerSelected(new Set(names.map((_, i) => i)))   // select all by default
     } catch (err) {
       toast.error(err.message || 'Could not list the Drive folder')
       setPickerOpen(false)
@@ -342,21 +346,23 @@ export default function ImportPage() {
     }
   }
 
-  const togglePickerFile = (name) => {
+  const togglePickerFile = (index) => {
     setPickerSelected((prev) => {
       const next = new Set(prev)
-      next.has(name) ? next.delete(name) : next.add(name)
+      next.has(index) ? next.delete(index) : next.add(index)
       return next
     })
   }
 
   const togglePickerAll = () => {
     setPickerSelected((prev) =>
-      prev.size === pickerFiles.length ? new Set() : new Set(pickerFiles))
+      prev.size === pickerFiles.length
+        ? new Set()
+        : new Set(pickerFiles.map((_, i) => i)))
   }
 
   const handleImportFromDrive = async () => {
-    const selectedFiles = Array.from(pickerSelected)
+    const selectedFiles = pickerFiles.filter((_, i) => pickerSelected.has(i))
     if (selectedFiles.length === 0) { toast.error('Select at least one file.'); return }
 
     setPickerOpen(false)
@@ -1505,13 +1511,13 @@ export default function ImportPage() {
               </span>
             </label>
             <div className="space-y-1 max-h-80 overflow-y-auto">
-              {pickerFiles.map((name) => (
-                <label key={name}
+              {pickerFiles.map((name, i) => (
+                <label key={`${name}-${i}`}
                       className="flex items-center gap-2.5 py-1.5 px-1 rounded hover:bg-slate-50 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={pickerSelected.has(name)}
-                    onChange={() => togglePickerFile(name)}
+                    checked={pickerSelected.has(i)}
+                    onChange={() => togglePickerFile(i)}
                     className="h-4 w-4 rounded border-slate-300 text-primary-600 shrink-0"
                   />
                   <span className="text-sm text-slate-700 font-mono truncate">{name}</span>
