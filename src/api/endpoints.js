@@ -696,6 +696,23 @@ export async function retryDriveFileWithPassword(fileName, password) {
   return data
 }
 
+// The Drive folder ID /imports/from-drive currently reads -- shown as the
+// starting value of the settings field on the Import page.
+export async function getDriveFolderSettings() {
+  const { data } = await api.get('/imports/drive-settings')
+  return data
+}
+
+// Changes it. The backend also pushes the new value to the Gmail Apps
+// Script's own web app so the two stay in sync -- see the docstring on
+// PUT /imports/drive-settings.
+export async function updateDriveFolderSettings(folderId) {
+  const form = new FormData()
+  form.append('folder_id', folderId)
+  const { data } = await api.put('/imports/drive-settings', form)
+  return data
+}
+
 // What is in a workbook, before anything is imported. Returns
 // { sheets: [{ name, rows, data_rows, header_row, headers_detected,
 //              unmapped_headers, is_statement, reason, sample,

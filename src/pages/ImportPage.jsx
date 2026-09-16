@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
+  getDriveFolderSettings, updateDriveFolderSettings,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers, HardDrive,
+  Layers, HardDrive, Settings, Check,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -124,6 +125,13 @@ export default function ImportPage() {
   // A "password_required" Drive row's own password box, keyed by filename.
   // { [name]: { value, busy } }
   const [drivePwRetry, setDrivePwRetry] = useState({})
+  // The Drive folder ID (routers/imports.py's /imports/drive-settings), shown
+  // and editable from this page instead of the Apps Script's own web app —
+  // folderIdInput only exists while the field is open for editing.
+  const [folderId, setFolderId] = useState('')
+  const [editingFolder, setEditingFolder] = useState(false)
+  const [folderIdInput, setFolderIdInput] = useState('')
+  const [savingFolder, setSavingFolder] = useState(false)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -135,7 +143,29 @@ export default function ImportPage() {
     fetchMasterData('bank', { include_inactive: true })
       .then((b) => setBanks(Array.isArray(b) ? b : []))
       .catch(() => {})
+    getDriveFolderSettings()
+      .then((r) => setFolderId(r.folder_id || ''))
+      .catch(() => {})
   }, [])
+
+  const startEditFolder = () => { setFolderIdInput(folderId); setEditingFolder(true) }
+  const cancelEditFolder = () => setEditingFolder(false)
+
+  const saveFolderId = async () => {
+    const value = folderIdInput.trim()
+    if (!value) { toast.error('Folder ID cannot be empty.'); return }
+    setSavingFolder(true)
+    try {
+      const res = await updateDriveFolderSettings(value)
+      setFolderId(res.folder_id)
+      setEditingFolder(false)
+      toast.success('Drive folder updated')
+    } catch (err) {
+      toast.error(err.message || 'Could not update the Drive folder')
+    } finally {
+      setSavingFolder(false)
+    }
+  }
 
   const handleFile = useCallback(async (f) => {
     if (!f) return
@@ -527,6 +557,58 @@ export default function ImportPage() {
                   as any row a plain upload left unassigned.
                 </p>
               </div>
+            </div>
+
+            <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+              {editingFolder ? (
+                <div>
+                  <label className="label">Drive Folder ID</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={folderIdInput}
+                      onChange={(e) => setFolderIdInput(e.target.value)}
+                      autoComplete="off"
+                      autoFocus
+                      placeholder="e.g. 1SutmDSaEILMkCJWf6Htx5p5WWJ11YuvR"
+                      className="input flex-1 font-mono text-xs"
+                      disabled={savingFolder}
+                    />
+                    <button
+                      onClick={saveFolderId}
+                      disabled={savingFolder}
+                      className="btn-primary shrink-0"
+                    >
+                      {savingFolder
+                        ? <Spinner size="sm" tone="white" />
+                        : <><Check className="h-4 w-4 mr-1" />Save</>}
+                    </button>
+                    <button
+                      onClick={cancelEditFolder}
+                      disabled={savingFolder}
+                      className="btn-secondary shrink-0"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    This also updates the Gmail Apps Script itself, so it
+                    keeps saving statements into the same folder this reads
+                    from.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-500">Drive Folder ID</p>
+                    <p className="text-sm font-mono text-slate-800 truncate">
+                      {folderId || 'Not set'}
+                    </p>
+                  </div>
+                  <button onClick={startEditFolder} className="btn-secondary shrink-0">
+                    <Settings className="h-3.5 w-3.5 mr-1.5" />Change
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
