@@ -672,14 +672,24 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
 // whose result is
 // { files: [{name, status, row_count | error}], imported, failed, needs_password }.
 // status is one of "done", "failed", "password_required", "skipped".
-export async function startDriveImportJob(pages = '', batchPages = null) {
+export async function startDriveImportJob(pages = '', batchPages = null, selectedFiles = null) {
   const form = new FormData()
   if (pages) form.append('pages', pages)
   if (batchPages !== null && batchPages !== '') {
     form.append('batch_pages', String(batchPages))
   }
+  if (selectedFiles && selectedFiles.length > 0) {
+    form.append('files', selectedFiles.join(','))
+  }
   const { data } = await api.post('/imports/from-drive', form)
   return data.job_id
+}
+
+// Every file GET /imports/drive-files would pick up on a normal run --
+// what the picker modal on the Import page shows before a Drive run starts.
+export async function listDriveFiles() {
+  const { data } = await api.get('/imports/drive-files')
+  return data.files || []
 }
 
 // Re-attempts one Drive file already matched to a bank but that couldn't be

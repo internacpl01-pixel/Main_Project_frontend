@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
-  getDriveFolderSettings, updateDriveFolderSettings,
+  getDriveFolderSettings, updateDriveFolderSettings, listDriveFiles,
 } from '../api/endpoints.js'
-import { PasswordInput, Spinner } from '../components/UI.jsx'
+import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
@@ -132,6 +132,13 @@ export default function ImportPage() {
   const [editingFolder, setEditingFolder] = useState(false)
   const [folderIdInput, setFolderIdInput] = useState('')
   const [savingFolder, setSavingFolder] = useState(false)
+  // The file-picker modal shown before a Drive run actually starts, so a
+  // person can import just one or a few files instead of always sweeping
+  // the whole pending list.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerFiles, setPickerFiles] = useState([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+  const [pickerSelected, setPickerSelected] = useState(new Set())
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -314,16 +321,52 @@ export default function ImportPage() {
     setBatchPwRetry({})
   }
 
-  const handleImportFromDrive = async () => {
+  // Opens the file picker instead of importing immediately -- fetches
+  // whatever's currently pending in the Drive folder so the modal always
+  // shows a fresh list, not one that might be stale from an earlier visit.
+  const openDrivePicker = async () => {
     const specError = pageSpecError(pages)
     if (specError) { toast.error(specError); return }
 
+    setPickerOpen(true)
+    setPickerLoading(true)
+    try {
+      const names = await listDriveFiles()
+      setPickerFiles(names)
+      setPickerSelected(new Set(names))   // select all by default
+    } catch (err) {
+      toast.error(err.message || 'Could not list the Drive folder')
+      setPickerOpen(false)
+    } finally {
+      setPickerLoading(false)
+    }
+  }
+
+  const togglePickerFile = (name) => {
+    setPickerSelected((prev) => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
+      return next
+    })
+  }
+
+  const togglePickerAll = () => {
+    setPickerSelected((prev) =>
+      prev.size === pickerFiles.length ? new Set() : new Set(pickerFiles))
+  }
+
+  const handleImportFromDrive = async () => {
+    const selectedFiles = Array.from(pickerSelected)
+    if (selectedFiles.length === 0) { toast.error('Select at least one file.'); return }
+
+    setPickerOpen(false)
     setDriveRunning(true)
     setProgress(null)
     setDriveResults(null)
     try {
       const jobId = await startDriveImportJob(
-        pages.trim(), batchPages.trim() === '' ? null : Number(batchPages))
+        pages.trim(), batchPages.trim() === '' ? null : Number(batchPages),
+        selectedFiles)
       // Reuses the same `progress` state the single-file and batch flows
       // already drive ImportProgressOverlay from -- a Drive run reports
       // itself in the exact same step shape (one step per file here, the
@@ -670,7 +713,7 @@ export default function ImportPage() {
 
             <div className="flex justify-center">
               <button
-                onClick={handleImportFromDrive}
+                onClick={openDrivePicker}
                 disabled={driveRunning || !!pageSpecErrorText}
                 className="btn-primary"
               >
@@ -1437,6 +1480,60 @@ export default function ImportPage() {
         stepWord={driveRunning ? 'File' : stepWord}
         skipUploadStep={driveRunning}
       />
+
+      {/* --- Drive file picker -------------------------------------------- */}
+      <Modal isOpen={pickerOpen} onClose={() => setPickerOpen(false)}
+            title="Select files to import" size="lg">
+        {pickerLoading ? (
+          <div className="py-10 flex justify-center"><Spinner /></div>
+        ) : pickerFiles.length === 0 ? (
+          <p className="text-sm text-slate-500 py-6 text-center">
+            Nothing pending — every file in the Drive folder is already
+            marked done or waiting on a password.
+          </p>
+        ) : (
+          <>
+            <label className="flex items-center gap-2.5 pb-3 mb-2 border-b border-slate-100 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pickerSelected.size === pickerFiles.length}
+                onChange={togglePickerAll}
+                className="h-4 w-4 rounded border-slate-300 text-primary-600"
+              />
+              <span className="text-sm font-medium text-slate-700">
+                Select all ({pickerFiles.length})
+              </span>
+            </label>
+            <div className="space-y-1 max-h-80 overflow-y-auto">
+              {pickerFiles.map((name) => (
+                <label key={name}
+                      className="flex items-center gap-2.5 py-1.5 px-1 rounded hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pickerSelected.has(name)}
+                    onChange={() => togglePickerFile(name)}
+                    className="h-4 w-4 rounded border-slate-300 text-primary-600 shrink-0"
+                  />
+                  <span className="text-sm text-slate-700 font-mono truncate">{name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-4 mt-3 border-t border-slate-100">
+              <button onClick={() => setPickerOpen(false)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={handleImportFromDrive}
+                disabled={pickerSelected.size === 0}
+                className="btn-primary"
+              >
+                <HardDrive className="h-4 w-4 mr-1.5" />
+                Import {pickerSelected.size > 0 ? `(${pickerSelected.size})` : ''}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   )
 }
