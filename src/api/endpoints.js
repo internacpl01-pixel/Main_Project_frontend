@@ -672,6 +672,8 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
 // whose result is
 // { files: [{name, status, row_count | error}], imported, failed, needs_password }.
 // status is one of "done", "failed", "password_required", "skipped".
+// selectedFiles is an array of Drive file IDs (listDriveFiles' `id` field),
+// not names -- two files can share a name, so only an id picks out one.
 export async function startDriveImportJob(pages = '', batchPages = null, selectedFiles = null) {
   const form = new FormData()
   if (pages) form.append('pages', pages)
@@ -687,9 +689,19 @@ export async function startDriveImportJob(pages = '', batchPages = null, selecte
 
 // Every file GET /imports/drive-files would pick up on a normal run --
 // what the picker modal on the Import page shows before a Drive run starts.
+// Each entry is {id, name} -- two files can share a name (a leftover of the
+// Apps Script's pre-fix collision race), and id is what lets the picker and
+// startDriveImportJob act on one specific copy instead of "every file called
+// this".
 export async function listDriveFiles() {
   const { data } = await api.get('/imports/drive-files')
   return data.files || []
+}
+
+// Trashes one not-yet-imported Drive file -- for discarding a duplicate
+// copy straight from the picker. See DELETE /imports/drive-files/{id}.
+export async function deletePendingDriveFile(fileId) {
+  await api.delete(`/imports/drive-files/${encodeURIComponent(fileId)}`)
 }
 
 // The permanent history behind DriveImportLogPage -- every outcome

@@ -4,13 +4,14 @@ import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
   getDriveFolderSettings, updateDriveFolderSettings, listDriveFiles,
+  deletePendingDriveFile,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers, HardDrive, Settings, Check,
+  Layers, HardDrive, Settings, Check, Search, Trash2, Copy,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -134,11 +135,15 @@ export default function ImportPage() {
   const [savingFolder, setSavingFolder] = useState(false)
   // The file-picker modal shown before a Drive run actually starts, so a
   // person can import just one or a few files instead of always sweeping
-  // the whole pending list.
+  // the whole pending list. pickerFiles is [{id, name}, ...]; selection and
+  // deletion are both keyed by id, not name -- two files can legitimately
+  // share a name (a leftover of the Apps Script's pre-fix collision race).
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerFiles, setPickerFiles] = useState([])
   const [pickerLoading, setPickerLoading] = useState(false)
   const [pickerSelected, setPickerSelected] = useState(new Set())
+  const [pickerSearch, setPickerSearch] = useState('')
+  const [pickerDeleting, setPickerDeleting] = useState(new Set())
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -330,14 +335,11 @@ export default function ImportPage() {
 
     setPickerOpen(true)
     setPickerLoading(true)
+    setPickerSearch('')
     try {
-      const names = await listDriveFiles()
-      setPickerFiles(names)
-      // Tracked by position, not name -- Drive can (and, before the retry
-      // fix, did) hold two files with the identical name, and a Set of
-      // names would silently collapse those into one, leaving "select all"
-      // permanently unable to show as fully checked.
-      setPickerSelected(new Set(names.map((_, i) => i)))   // select all by default
+      const list = await listDriveFiles()
+      setPickerFiles(list)
+      setPickerSelected(new Set(list.map((f) => f.id)))   // select all by default
     } catch (err) {
       toast.error(err.message || 'Could not list the Drive folder')
       setPickerOpen(false)
@@ -346,23 +348,68 @@ export default function ImportPage() {
     }
   }
 
-  const togglePickerFile = (index) => {
+  const togglePickerFile = (id) => {
     setPickerSelected((prev) => {
       const next = new Set(prev)
-      next.has(index) ? next.delete(index) : next.add(index)
+      next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
   }
 
-  const togglePickerAll = () => {
-    setPickerSelected((prev) =>
-      prev.size === pickerFiles.length
-        ? new Set()
-        : new Set(pickerFiles.map((_, i) => i)))
+  // Selects/clears every file currently matching the search box, not the
+  // whole list -- toggling "all" while a search narrows the view should act
+  // on what's visible, the same as every other filtered select-all in this
+  // app.
+  const togglePickerAll = (visibleFiles) => {
+    const visibleIds = visibleFiles.map((f) => f.id)
+    const allVisibleSelected = visibleIds.every((id) => pickerSelected.has(id))
+    setPickerSelected((prev) => {
+      const next = new Set(prev)
+      visibleIds.forEach((id) => (allVisibleSelected ? next.delete(id) : next.add(id)))
+      return next
+    })
+  }
+
+  // Names that appear on more than one pending file -- the Apps Script's
+  // pre-fix collision race left some of these behind (see Code.gs's
+  // hasAnySavedVariant). Flagged here so a person can tell the two apart
+  // and discard the extra copy before it wastes an import slot.
+  const pickerDuplicateNames = new Set(
+    Object.entries(
+      pickerFiles.reduce((counts, f) => {
+        counts[f.name] = (counts[f.name] || 0) + 1
+        return counts
+      }, {})
+    ).filter(([, count]) => count > 1).map(([name]) => name)
+  )
+
+  const pickerVisible = pickerSearch.trim()
+    ? pickerFiles.filter((f) =>
+        f.name.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+    : pickerFiles
+
+  const handleDeletePickerFile = async (file) => {
+    setPickerDeleting((prev) => new Set(prev).add(file.id))
+    try {
+      await deletePendingDriveFile(file.id)
+      setPickerFiles((prev) => prev.filter((f) => f.id !== file.id))
+      setPickerSelected((prev) => {
+        const next = new Set(prev); next.delete(file.id); return next
+      })
+      toast.success(`Moved "${file.name}" to Drive's Trash`)
+    } catch (err) {
+      toast.error(err.message || 'Could not delete that file')
+    } finally {
+      setPickerDeleting((prev) => {
+        const next = new Set(prev); next.delete(file.id); return next
+      })
+    }
   }
 
   const handleImportFromDrive = async () => {
-    const selectedFiles = pickerFiles.filter((_, i) => pickerSelected.has(i))
+    const selectedFiles = pickerFiles
+      .filter((f) => pickerSelected.has(f.id))
+      .map((f) => f.id)
     if (selectedFiles.length === 0) { toast.error('Select at least one file.'); return }
 
     setPickerOpen(false)
@@ -1499,31 +1546,86 @@ export default function ImportPage() {
           </p>
         ) : (
           <>
+            <div className="relative mb-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                autoComplete="off"
+                placeholder="Search by filename or keyword..."
+                className="input pl-9"
+              />
+              {pickerSearch && (
+                <button
+                  onClick={() => setPickerSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
             <label className="flex items-center gap-2.5 pb-3 mb-2 border-b border-slate-100 cursor-pointer">
               <input
                 type="checkbox"
-                checked={pickerSelected.size === pickerFiles.length}
-                onChange={togglePickerAll}
+                checked={pickerVisible.length > 0
+                  && pickerVisible.every((f) => pickerSelected.has(f.id))}
+                onChange={() => togglePickerAll(pickerVisible)}
                 className="h-4 w-4 rounded border-slate-300 text-primary-600"
               />
               <span className="text-sm font-medium text-slate-700">
-                Select all ({pickerFiles.length})
+                Select all
+                {pickerSearch ? ` matching (${pickerVisible.length})` : ` (${pickerFiles.length})`}
               </span>
             </label>
-            <div className="space-y-1 max-h-80 overflow-y-auto">
-              {pickerFiles.map((name, i) => (
-                <label key={`${name}-${i}`}
-                      className="flex items-center gap-2.5 py-1.5 px-1 rounded hover:bg-slate-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pickerSelected.has(i)}
-                    onChange={() => togglePickerFile(i)}
-                    className="h-4 w-4 rounded border-slate-300 text-primary-600 shrink-0"
-                  />
-                  <span className="text-sm text-slate-700 font-mono truncate">{name}</span>
-                </label>
-              ))}
-            </div>
+
+            {pickerVisible.length === 0 ? (
+              <p className="text-sm text-slate-400 py-6 text-center">
+                Nothing matches "{pickerSearch}".
+              </p>
+            ) : (
+              <div className="space-y-1 max-h-80 overflow-y-auto">
+                {pickerVisible.map((f) => {
+                  const isDuplicate = pickerDuplicateNames.has(f.name)
+                  const isDeleting = pickerDeleting.has(f.id)
+                  return (
+                    <div key={f.id}
+                        className={`flex items-center gap-2.5 py-1.5 px-1 rounded hover:bg-slate-50 ${
+                          isDeleting ? 'opacity-40' : ''
+                        }`}>
+                      <label className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pickerSelected.has(f.id)}
+                          onChange={() => togglePickerFile(f.id)}
+                          disabled={isDeleting}
+                          className="h-4 w-4 rounded border-slate-300 text-primary-600 shrink-0"
+                        />
+                        <span className="text-sm text-slate-700 font-mono truncate">{f.name}</span>
+                      </label>
+                      {isDuplicate && (
+                        <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5
+                                         rounded-full text-[11px] font-medium bg-amber-50
+                                         text-amber-700 border border-amber-100">
+                          <Copy className="h-3 w-3" />Duplicate
+                        </span>
+                      )}
+                      {isDuplicate && (
+                        <button
+                          onClick={() => handleDeletePickerFile(f)}
+                          disabled={isDeleting}
+                          title="Move this copy to Drive's Trash"
+                          className="shrink-0 p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        >
+                          {isDeleting ? <Spinner size="sm" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 pt-4 mt-3 border-t border-slate-100">
               <button onClick={() => setPickerOpen(false)} className="btn-secondary">
                 Cancel
