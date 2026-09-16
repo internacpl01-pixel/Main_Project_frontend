@@ -6,10 +6,17 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { HardDrive, CheckCircle, XCircle, Lock, MinusCircle, Trash2 } from 'lucide-react'
+import {
+  HardDrive, CheckCircle, XCircle, Lock, MinusCircle, Trash2, Calendar, X,
+} from 'lucide-react'
 
 // `all` is the absence of a filter, not a value the server knows.
 const STATUSES = ['all', 'done', 'failed', 'password_required', 'skipped']
+
+// A fixed list rather than free text -- the days figure only ever needs to
+// be "roughly how long", and a dropdown can't be typo'd into 9000 or left
+// blank the way a text box could.
+const CLEANUP_DAY_OPTIONS = [30, 60, 90, 180, 365]
 
 const STATUS_STYLE = {
   done: 'bg-emerald-50 text-emerald-700 border-emerald-100',
@@ -133,36 +140,44 @@ export default function DriveImportLogPage() {
       />
 
       {cleanupOpen && (
-        <div className="card mb-4">
-          <div className="card-body flex flex-wrap items-end gap-3">
-            <div>
-              <label className="label">
-                Move "Done" statements older than
-              </label>
+        <div className="card mb-4 border-primary-100 bg-gradient-to-br from-primary-50/60 to-white">
+          <div className="card-body">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="flex items-end gap-3">
+                <div className="h-10 w-10 shrink-0 rounded-lg bg-primary-100 text-primary-600 flex items-center justify-center">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <label className="label mb-1.5">
+                    Move "Done" statements older than
+                  </label>
+                  <select
+                    value={cleanupDays}
+                    onChange={(e) => setCleanupDays(e.target.value)}
+                    className="input w-40 bg-white"
+                  >
+                    {CLEANUP_DAY_OPTIONS.map((d) => (
+                      <option key={d} value={d}>{d} days</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div className="flex items-center gap-2">
-                <input
-                  value={cleanupDays}
-                  onChange={(e) => setCleanupDays(e.target.value.replace(/[^\d]/g, ''))}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  className={`input w-24 ${!daysValid ? 'border-red-300 focus:ring-red-200' : ''}`}
-                />
-                <span className="text-sm text-slate-600">days (by the statement's own date) to Trash</span>
+                <button
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={!daysValid}
+                  className="btn-primary"
+                >
+                  <Trash2 className="h-4 w-4 mr-1.5" />Clean up
+                </button>
+                <button onClick={() => setCleanupOpen(false)} className="btn-secondary">
+                  <X className="h-4 w-4 mr-1.5" />Cancel
+                </button>
               </div>
             </div>
-            <button
-              onClick={() => setConfirmOpen(true)}
-              disabled={!daysValid}
-              className="btn-primary"
-            >
-              <Trash2 className="h-4 w-4 mr-1.5" />Clean up
-            </button>
-            <button onClick={() => setCleanupOpen(false)} className="btn-secondary">
-              Cancel
-            </button>
-          </div>
-          <div className="px-6 pb-4 -mt-1">
-            <p className="text-xs text-slate-400">
+            <p className="mt-3 text-xs text-primary-900/60">
+              Judged by the statement's own date, not when it was imported.
               Only files already marked "_done" are touched — a failed or
               password-waiting file is left alone no matter how old it is.
               Moved to Drive's own Trash, recoverable there for about 30 days,
@@ -183,54 +198,68 @@ export default function DriveImportLogPage() {
         busy={cleaningUp}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          {STATUSES.map((s) => (
-            <button
-              key={s}
-              onClick={() => { setStatus(s); setPage(1) }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                status === s
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {s === 'all' ? 'All' : STATUS_LABEL[s]}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="date"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
-            className="input py-1.5 text-sm"
-            title="From date"
-          />
-          <span className="text-slate-400 text-sm">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
-            className="input py-1.5 text-sm"
-            title="To date"
-          />
-          <div className="w-full sm:w-64">
-            <SearchInput
-              value={search}
-              onChange={setSearch}
-              onClear={() => setSearch('')}
-              placeholder="Filter by filename..."
-            />
+      <div className="card mb-4">
+        <div className="card-body space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {STATUSES.map((s) => {
+              const Icon = s === 'all' ? null : STATUS_ICON[s]
+              return (
+                <button
+                  key={s}
+                  onClick={() => { setStatus(s); setPage(1) }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    status === s
+                      ? 'bg-primary-600 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-primary-50 hover:text-primary-700 hover:border-primary-200'
+                  }`}
+                >
+                  {Icon && <Icon className="h-3.5 w-3.5" />}
+                  {s === 'all' ? 'All' : STATUS_LABEL[s]}
+                </button>
+              )
+            })}
           </div>
-          {filtered && (
-            <button onClick={clearAll} className="text-xs font-medium text-slate-500 hover:text-slate-700">
-              Clear filters
-            </button>
-          )}
+
+          <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-slate-100">
+            <div className="flex items-center gap-2 pt-3">
+              <Calendar className="h-4 w-4 text-primary-500 shrink-0" />
+              <input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
+                className="input py-1.5 text-sm w-40"
+                title="From date"
+              />
+              <span className="text-slate-400 text-sm">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
+                className="input py-1.5 text-sm w-40"
+                title="To date"
+              />
+            </div>
+
+            <div className="w-full sm:w-64 pt-3 sm:pt-0">
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                onClear={() => setSearch('')}
+                placeholder="Filter by filename..."
+              />
+            </div>
+
+            {filtered && (
+              <button
+                onClick={clearAll}
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-800 pt-3 sm:pt-0"
+              >
+                <X className="h-3.5 w-3.5" />Clear filters
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
