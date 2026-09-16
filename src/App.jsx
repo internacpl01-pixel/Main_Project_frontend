@@ -15,6 +15,7 @@ import FarvisionVerifyPage from './pages/FarvisionVerifyPage.jsx'
 import LedgerPage from './pages/LedgerPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
 import DriveImportLogPage from './pages/DriveImportLogPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 import ExportPage from './pages/ExportPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
 import CompaniesPage from './pages/CompaniesPage.jsx'
@@ -106,6 +107,9 @@ export default function App() {
         <Route path="export" element={<CompanyRoute><ExportPage /></CompanyRoute>} />
         <Route path="users" element={<CompanyRoute><LevelRoute requiredLevel={MANAGER}><UsersPage /></LevelRoute></CompanyRoute>} />
         <Route path="companies" element={<LevelRoute requiredLevel={SUPER_ADMIN}><CompaniesPage /></LevelRoute>} />
+        {/* Not wrapped in CompanyRoute: a super admin has no company but still
+            needs somewhere to change their password or sign out. */}
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

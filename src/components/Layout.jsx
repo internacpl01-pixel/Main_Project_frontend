@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
   FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck, ListChecks,
-  HardDrive,
+  HardDrive, Settings as SettingsIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
@@ -97,9 +97,14 @@ export default function Layout() {
         <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-60 bg-white border-r border-slate-200 transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center justify-between h-14 px-4 border-b border-slate-100">
+      {/* Sidebar. flex-col with the nav list as the only flex-1 child is what
+          lets the logo stay put at the top and Settings/the company badge
+          stay put at the bottom while the middle scrolls -- previously the
+          company badge was absolutely positioned over whatever the nav list
+          ended at, and a list long enough to reach the bottom of the screen
+          had no way to scroll to its own last items at all. */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-60 bg-white border-r border-slate-200 flex flex-col transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="shrink-0 flex items-center justify-between h-14 px-4 border-b border-slate-100">
           {/* The brand is the way home from anywhere, which is what people
               already try first. It was a plain div, so clicking it did nothing
               on every page in the app. */}
@@ -117,7 +122,7 @@ export default function Layout() {
           </button>
         </div>
 
-        <nav className="p-3 space-y-0.5">
+        <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-0.5">
           {visibleNav.map((item) => (
             <NavLink
               key={item.to}
@@ -138,24 +143,46 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Company badge. Absent for a super admin, who has no company. */}
-        {hasCompany && !isSuperAdmin && (
-          <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-slate-100">
-            {/* Name first, schema underneath. This used to show `company_001`
-                and nothing else, which is the database's word for the company,
-                not the company's. The schema stays visible because it is what
-                every error message and support question refers to. */}
-            <div className="px-3 py-2 bg-slate-50 rounded-lg">
-              <div className="text-[10px] uppercase tracking-wide text-slate-400">Company</div>
-              <div className="text-xs font-medium text-slate-700 truncate" title={user.companyName || ''}>
-                {user.companyName || user.schema}
-              </div>
-              {user.companyName && (
-                <div className="text-[11px] text-slate-400 font-mono truncate">{user.schema}</div>
-              )}
-            </div>
+        {/* Pinned footer: Settings, then the company badge -- neither one
+            scrolls away with the rest of the list, the same as every other
+            platform keeps its own Settings entry anchored at the bottom. */}
+        <div className="shrink-0 border-t border-slate-100">
+          <div className="p-3 pb-1.5">
+            <NavLink
+              to="/settings"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-primary-50 text-primary-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`
+              }
+            >
+              <SettingsIcon className="h-4 w-4" />
+              Settings
+            </NavLink>
           </div>
-        )}
+
+          {/* Company badge. Absent for a super admin, who has no company. */}
+          {hasCompany && !isSuperAdmin && (
+            <div className="p-3 pt-1.5">
+              {/* Name first, schema underneath. This used to show `company_001`
+                  and nothing else, which is the database's word for the company,
+                  not the company's. The schema stays visible because it is what
+                  every error message and support question refers to. */}
+              <div className="px-3 py-2 bg-slate-50 rounded-lg">
+                <div className="text-[10px] uppercase tracking-wide text-slate-400">Company</div>
+                <div className="text-xs font-medium text-slate-700 truncate" title={user.companyName || ''}>
+                  {user.companyName || user.schema}
+                </div>
+                {user.companyName && (
+                  <div className="text-[11px] text-slate-400 font-mono truncate">{user.schema}</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Main content area */}
