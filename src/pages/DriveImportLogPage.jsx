@@ -151,15 +151,31 @@ export default function DriveImportLogPage() {
                   <label className="label mb-1.5">
                     Move "Done" statements older than
                   </label>
-                  <select
-                    value={cleanupDays}
-                    onChange={(e) => setCleanupDays(e.target.value)}
-                    className="input w-40 bg-white"
-                  >
-                    {CLEANUP_DAY_OPTIONS.map((d) => (
-                      <option key={d} value={d}>{d} days</option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={cleanupDays}
+                      onChange={(e) => setCleanupDays(e.target.value.replace(/[^\d]/g, ''))}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="90"
+                      className={`input w-24 bg-white ${!daysValid ? 'border-red-300 focus:ring-red-200' : ''}`}
+                    />
+                    <span className="text-sm text-slate-600">days, or</span>
+                    <select
+                      // Purely a shortcut into the input above -- it never
+                      // holds a value of its own, so picking the same preset
+                      // twice in a row still fires the change and updates
+                      // cleanupDays each time.
+                      value=""
+                      onChange={(e) => e.target.value && setCleanupDays(e.target.value)}
+                      className="input w-36 bg-white"
+                    >
+                      <option value="" disabled>Quick pick...</option>
+                      {CLEANUP_DAY_OPTIONS.map((d) => (
+                        <option key={d} value={d}>{d} days</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
