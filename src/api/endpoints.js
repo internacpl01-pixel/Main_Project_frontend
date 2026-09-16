@@ -700,6 +700,16 @@ export async function fetchDriveImportLog(params = {}) {
   return data
 }
 
+// Moves every "_done" Drive file to Drive's own Trash once its OWN
+// statement date is at least olderThanDays old -- see the docstring on
+// POST /imports/drive-cleanup for why this is Trash, not permanent delete.
+export async function cleanupDriveDoneFiles(olderThanDays) {
+  const form = new FormData()
+  form.append('older_than_days', String(olderThanDays))
+  const { data } = await api.post('/imports/drive-cleanup', form)
+  return data
+}
+
 // Re-attempts one Drive file already matched to a bank but that couldn't be
 // opened with its saved password (or had none) -- see the "password_required"
 // status above. fileName is the file's CURRENT name in Drive, i.e. already

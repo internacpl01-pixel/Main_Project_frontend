@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
-import { fetchDriveImportLog } from '../api/endpoints.js'
+import { fetchDriveImportLog, cleanupDriveDoneFiles } from '../api/endpoints.js'
 import {
-  EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows,
+  EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows, ConfirmDialog,
 } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { HardDrive, CheckCircle, XCircle, Lock, MinusCircle } from 'lucide-react'
+import { HardDrive, CheckCircle, XCircle, Lock, MinusCircle, Trash2 } from 'lucide-react'
 
 // `all` is the absence of a filter, not a value the server knows.
 const STATUSES = ['all', 'done', 'failed', 'password_required', 'skipped']
@@ -42,6 +43,7 @@ function when(iso) {
 }
 
 export default function DriveImportLogPage() {
+  const { canWrite } = useAuth()
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -53,6 +55,16 @@ export default function DriveImportLogPage() {
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
+
+  // Cleanup: trashes "_done" Drive files whose own statement date is older
+  // than this many days. cleanupOpen just shows the days input; confirmOpen
+  // is the separate "are you sure" step -- this changes real Drive state
+  // (even if Trash keeps it recoverable for a while), so it gets the same
+  // two-step confirm as discarding a batch elsewhere in this app.
+  const [cleanupOpen, setCleanupOpen] = useState(false)
+  const [cleanupDays, setCleanupDays] = useState('90')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [cleaningUp, setCleaningUp] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => { setQuery(search); setPage(1) }, 300)
@@ -89,11 +101,86 @@ export default function DriveImportLogPage() {
     setStatus('all'); setSearch(''); setDateFrom(''); setDateTo(''); setPage(1)
   }
 
+  const daysValid = /^\d+$/.test(cleanupDays) && Number(cleanupDays) >= 1
+
+  const runCleanup = async () => {
+    setCleaningUp(true)
+    try {
+      const res = await cleanupDriveDoneFiles(Number(cleanupDays))
+      setConfirmOpen(false)
+      setCleanupOpen(false)
+      toast.success(res.count > 0
+        ? `Moved ${res.count} old statement${res.count === 1 ? '' : 's'} to Drive's Trash`
+        : `Nothing older than ${cleanupDays} days to clean up`)
+      load()
+    } catch (err) {
+      toast.error(err.message || 'Could not clean up the Drive folder')
+    } finally {
+      setCleaningUp(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Drive Import Log"
         description="Every file the Gmail Apps Script has ever handed to Import from Drive — what happened to it and why, kept after the run itself is gone from screen."
+        actions={canWrite && (
+          <button onClick={() => setCleanupOpen((v) => !v)} className="btn-secondary">
+            <Trash2 className="h-4 w-4 mr-1.5" />Clean up old statements
+          </button>
+        )}
+      />
+
+      {cleanupOpen && (
+        <div className="card mb-4">
+          <div className="card-body flex flex-wrap items-end gap-3">
+            <div>
+              <label className="label">
+                Move "Done" statements older than
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  value={cleanupDays}
+                  onChange={(e) => setCleanupDays(e.target.value.replace(/[^\d]/g, ''))}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className={`input w-24 ${!daysValid ? 'border-red-300 focus:ring-red-200' : ''}`}
+                />
+                <span className="text-sm text-slate-600">days (by the statement's own date) to Trash</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setConfirmOpen(true)}
+              disabled={!daysValid}
+              className="btn-primary"
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />Clean up
+            </button>
+            <button onClick={() => setCleanupOpen(false)} className="btn-secondary">
+              Cancel
+            </button>
+          </div>
+          <div className="px-6 pb-4 -mt-1">
+            <p className="text-xs text-slate-400">
+              Only files already marked "_done" are touched — a failed or
+              password-waiting file is left alone no matter how old it is.
+              Moved to Drive's own Trash, recoverable there for about 30 days,
+              not deleted outright.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={runCleanup}
+        title="Clean up old Drive statements?"
+        message={`Every "_done" file whose own statement date is more than ${cleanupDays} days old will be moved to Drive's Trash. This can't be undone from here — recovery would be through Drive's own Trash directly.`}
+        confirmText="Move to Trash"
+        danger
+        busy={cleaningUp}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
