@@ -49,6 +49,8 @@ export default function DriveImportLogPage() {
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
 
@@ -62,6 +64,8 @@ export default function DriveImportLogPage() {
     try {
       const params = { limit, offset: (page - 1) * limit }
       if (status !== 'all') params.status = status
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
       const data = await fetchDriveImportLog(params)
       setRows(data.rows || [])
       setTotal(data.total ?? 0)
@@ -70,7 +74,7 @@ export default function DriveImportLogPage() {
     } finally {
       setLoading(false)
     }
-  }, [status, page, limit])
+  }, [status, dateFrom, dateTo, page, limit])
 
   useEffect(() => { load() }, [load])
 
@@ -79,7 +83,11 @@ export default function DriveImportLogPage() {
   const visible = query.trim()
     ? rows.filter((r) => r.file_name.toLowerCase().includes(query.trim().toLowerCase()))
     : rows
-  const filtered = status !== 'all' || query.trim()
+  const filtered = status !== 'all' || query.trim() || dateFrom || dateTo
+
+  const clearAll = () => {
+    setStatus('all'); setSearch(''); setDateFrom(''); setDateTo(''); setPage(1)
+  }
 
   return (
     <div>
@@ -105,13 +113,37 @@ export default function DriveImportLogPage() {
           ))}
         </div>
 
-        <div className="w-full sm:w-80">
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            onClear={() => setSearch('')}
-            placeholder="Filter by filename..."
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
+            className="input py-1.5 text-sm"
+            title="From date"
           />
+          <span className="text-slate-400 text-sm">to</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
+            className="input py-1.5 text-sm"
+            title="To date"
+          />
+          <div className="w-full sm:w-64">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              onClear={() => setSearch('')}
+              placeholder="Filter by filename..."
+            />
+          </div>
+          {filtered && (
+            <button onClick={clearAll} className="text-xs font-medium text-slate-500 hover:text-slate-700">
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -146,7 +178,7 @@ export default function DriveImportLogPage() {
                             : 'Every file Import from Drive touches — done, failed, or waiting on a password — is recorded here from now on.'
                         }
                         action={filtered
-                          ? <button onClick={() => { setStatus('all'); setSearch('') }} className="btn-secondary text-sm">Clear filters</button>
+                          ? <button onClick={clearAll} className="btn-secondary text-sm">Clear filters</button>
                           : undefined}
                       />
                     </td>
