@@ -133,7 +133,7 @@ export default function DriveImportLogPage() {
         title="Drive Import Log"
         description="Every file the Gmail Apps Script has ever handed to Import from Drive — what happened to it and why, kept after the run itself is gone from screen."
         actions={canWrite && (
-          <button onClick={() => setCleanupOpen((v) => !v)} className="btn-secondary">
+          <button onClick={() => setCleanupOpen((v) => !v)} className="btn-danger">
             <Trash2 className="h-4 w-4 mr-1.5" />Clean up old statements
           </button>
         )}
