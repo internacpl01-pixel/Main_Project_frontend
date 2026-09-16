@@ -692,6 +692,14 @@ export async function listDriveFiles() {
   return data.files || []
 }
 
+// The permanent history behind DriveImportLogPage -- every outcome
+// /imports/from-drive (or its retry-password endpoint) has ever recorded,
+// which outlives the job registry a run's own progress overlay reads from.
+export async function fetchDriveImportLog(params = {}) {
+  const { data } = await api.get('/imports/drive-log', { params })
+  return data
+}
+
 // Re-attempts one Drive file already matched to a bank but that couldn't be
 // opened with its saved password (or had none) -- see the "password_required"
 // status above. fileName is the file's CURRENT name in Drive, i.e. already

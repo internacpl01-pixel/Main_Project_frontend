@@ -14,6 +14,7 @@ import StagingPage from './pages/StagingPage.jsx'
 import FarvisionVerifyPage from './pages/FarvisionVerifyPage.jsx'
 import LedgerPage from './pages/LedgerPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
+import DriveImportLogPage from './pages/DriveImportLogPage.jsx'
 import ExportPage from './pages/ExportPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
 import CompaniesPage from './pages/CompaniesPage.jsx'
@@ -95,6 +96,7 @@ export default function App() {
             refuses the write to anyone below manager. */}
         <Route path="rules" element={<CompanyRoute><RulesPage /></CompanyRoute>} />
         <Route path="import" element={<CompanyRoute><ImportPage /></CompanyRoute>} />
+        <Route path="drive-import-log" element={<CompanyRoute><DriveImportLogPage /></CompanyRoute>} />
         <Route path="staging" element={<CompanyRoute><StagingPage /></CompanyRoute>} />
         {/* Reached from Imported Rows' "Export Farvision" button (carrying its
             current filters via navigation state), not typed directly -- it is

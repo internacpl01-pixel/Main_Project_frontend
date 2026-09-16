@@ -3,7 +3,8 @@ import { useAuth, MANAGER, SUPER_ADMIN } from '../context/AuthContext.jsx'
 import {
   LayoutDashboard, Upload, FileSpreadsheet, ArrowLeftRight,
   LogOut, Menu, X, ChevronDown, ArrowDownToLine, Users, Building2, Columns3,
-  FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck, ListChecks
+  FolderKanban, Database, History, KeyRound, BookOpen, ShieldCheck, ListChecks,
+  HardDrive,
 } from 'lucide-react'
 import { useState } from 'react'
 import ChangePasswordDialog from './ChangePasswordDialog.jsx'
@@ -39,6 +40,10 @@ const NAV = [
   // to match the route guard and the API.
   { to: '/change-log', icon: History, label: 'Change Log', requiredLevel: MANAGER },
   { to: '/import', icon: Upload, label: 'Import Statement' },
+  // Directly under Import Statement: a permanent record of what its Drive
+  // source has done, since the run's own progress overlay and job registry
+  // are both gone within minutes of finishing.
+  { to: '/drive-import-log', icon: HardDrive, label: 'Drive Import Log' },
   { to: '/staging', icon: FileSpreadsheet, label: 'Imported Rows' },
   // Directly after Imported Rows: it is the review step in front of the
   // Farvision export, reached normally via that button rather than typed
