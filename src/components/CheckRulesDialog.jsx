@@ -116,6 +116,24 @@ export default function CheckRulesDialog({
   const [infoOpenId, setInfoOpenId] = useState(null)
   const infoRef = useRef(null)
 
+  // The rule + its conditions, collapsed behind an info button instead of an
+  // always-open block -- with several conditions this ran to four or five
+  // lines above the conflicts table, pushing the actual working area (the
+  // rows to fix) below the fold on a normal-height dialog.
+  const [ruleInfoOpen, setRuleInfoOpen] = useState(false)
+  const ruleInfoRef = useRef(null)
+
+  useEffect(() => {
+    if (!ruleInfoOpen) return
+    const away = (e) => {
+      if (ruleInfoRef.current && !ruleInfoRef.current.contains(e.target)) {
+        setRuleInfoOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [ruleInfoOpen])
+
   useEffect(() => {
     if (infoOpenId == null) return
     const away = (e) => {
@@ -519,43 +537,58 @@ export default function CheckRulesDialog({
         {result && (
           <div className="space-y-4">
             {/* The rule, in the company's own words: the column label comes
-                from its fieldmap, the head names from its master table. */}
-            <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm space-y-1">
-              <p className="font-medium text-slate-700">
+                from its fieldmap, the head names from its master table.
+                Collapsed behind an info button rather than always shown --
+                with several conditions this ran four or five lines deep,
+                pushing the actual working area (the rows to fix) down the
+                dialog for no benefit once it had been read once. */}
+            <div className="relative flex items-center gap-1.5" ref={ruleInfoRef}>
+              <p className="text-sm font-medium text-slate-700">
                 The {result.account_type} rule — {result.target.label}
               </p>
-              {['CR', 'DR'].map((d) => (
-                result.expected[d] && (
-                  <p key={d} className="text-slate-600">
-                    <span className="font-mono font-medium">{d}</span>
-                    {' → '}
-                    {result.expected[d].map((h) => h.name).join(' or ')}
-                    <span className="text-slate-400"> — {result.why[d]}</span>
-                  </p>
-                )
-              ))}
-              {/* The conditions that ran alongside it, in the order they
-                  decided. Shown whether or not any row matched one: knowing a
-                  sentence exists and caught nothing is worth as much as seeing
-                  it catch something. */}
-              {Object.keys(result.conditions || {}).length > 0 && (
-                <div className="mt-2 border-t border-slate-200 pt-2">
-                  <p className="text-xs font-medium text-slate-500">
-                    Conditions, checked before the grid
-                  </p>
-                  {Object.entries(result.conditions).map(([id, c]) => {
-                    const hit = result.rows.filter(
-                      (r) => String(r.rule_id) === id).length
-                    return (
-                      <p key={id} className="text-slate-600">
-                        <span className="font-mono font-medium">{c.direction}</span>
-                        {' → '}{c.sentence}
-                        <span className="text-slate-400">
-                          {' '}— {hit} {hit === 1 ? 'row' : 'rows'} here
-                        </span>
+              <button
+                onClick={() => setRuleInfoOpen((o) => !o)}
+                title="Show the rule and its conditions"
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+              {ruleInfoOpen && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-96 max-w-[min(90vw,32rem)] space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-lg">
+                  {['CR', 'DR'].map((d) => (
+                    result.expected[d] && (
+                      <p key={d} className="text-slate-600">
+                        <span className="font-mono font-medium">{d}</span>
+                        {' → '}
+                        {result.expected[d].map((h) => h.name).join(' or ')}
+                        <span className="text-slate-400"> — {result.why[d]}</span>
                       </p>
                     )
-                  })}
+                  ))}
+                  {/* The conditions that ran alongside it, in the order they
+                      decided. Shown whether or not any row matched one:
+                      knowing a sentence exists and caught nothing is worth as
+                      much as seeing it catch something. */}
+                  {Object.keys(result.conditions || {}).length > 0 && (
+                    <div className="mt-2 border-t border-slate-200 pt-2">
+                      <p className="text-xs font-medium text-slate-500">
+                        Conditions, checked before the grid
+                      </p>
+                      {Object.entries(result.conditions).map(([id, c]) => {
+                        const hit = result.rows.filter(
+                          (r) => String(r.rule_id) === id).length
+                        return (
+                          <p key={id} className="text-slate-600">
+                            <span className="font-mono font-medium">{c.direction}</span>
+                            {' → '}{c.sentence}
+                            <span className="text-slate-400">
+                              {' '}— {hit} {hit === 1 ? 'row' : 'rows'} here
+                            </span>
+                          </p>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
