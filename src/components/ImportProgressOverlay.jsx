@@ -215,10 +215,28 @@ export default function ImportProgressOverlay({
   // counted straight from batches_done, is the real number for that shape of
   // job -- the same information the step list above is drawn from, just
   // rolled into one figure.
+  //
+  // The file/sheet currently being read gets half credit rather than zero:
+  // counting only whole finished ones means the FIRST file reads a flat 0%
+  // for however long it takes to read, however large it is, which looks
+  // exactly like "stuck" even though it plainly is not (the file name and
+  // elapsed seconds are both moving). Half is not a real fraction of that
+  // file's own progress -- there is none to report -- it is an honest "this
+  // one is under way", the same thing the spinner next to it already says,
+  // just folded into the one number underneath.
+  const inProgress = progress?.state === 'parsing' || progress?.state === 'saving' ? 0.5 : 0
   const overall = uploadPct !== null
     ? null
     : !realProgress
-      ? Math.round(((progress?.batches_done?.length || 0) * 100) / (progress?.batch_total || 1))
+      // Rounded UP, not to the nearest whole percent -- a run of 300 files
+      // spends its first one or two *completed* files still rounding to 0%
+      // under ordinary rounding (1/300 is 0.33%), which is the same "looks
+      // stuck" complaint all over again just delayed a file or two. Capped
+      // below 100 until the job actually reports 'done', so the last file
+      // being read is never shown as finished before it is.
+      ? (progress?.state === 'done' ? 100 : Math.min(99, Math.ceil(
+          (((progress?.batches_done?.length || 0) + inProgress) * 100)
+          / (progress?.batch_total || 1))))
       : progress?.batch_total > 1 ? progress.overall_percent : progress?.percent
   const elapsed = progress?.elapsed_ms >= 1000
     ? `${Math.round(progress.elapsed_ms / 1000)}s`
