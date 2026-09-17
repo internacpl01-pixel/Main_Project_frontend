@@ -144,6 +144,13 @@ export default function ImportPage() {
   const [pickerSelected, setPickerSelected] = useState(new Set())
   const [pickerSearch, setPickerSearch] = useState('')
   const [pickerDeleting, setPickerDeleting] = useState(new Set())
+  // Files GET /imports/drive-files flagged unmatched -- an unparseable name,
+  // or one naming a bank account that isn't in bank_master. Surfaced before
+  // the main picker so a person can discard them up front instead of finding
+  // out only after they're marked "_failed" post-import.
+  const [unmatchedOpen, setUnmatchedOpen] = useState(false)
+  const [unmatchedList, setUnmatchedList] = useState([])
+  const [deletingUnmatched, setDeletingUnmatched] = useState(false)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -340,11 +347,43 @@ export default function ImportPage() {
       const list = await listDriveFiles()
       setPickerFiles(list)
       setPickerSelected(new Set(list.map((f) => f.id)))   // select all by default
+
+      // Flagged server-side (an unparseable name, or a bank the filename
+      // names that isn't in bank_master) -- surfaced up front, before the
+      // main picker is actually used, rather than only after importing them
+      // fails the same way every time.
+      const unmatched = list.filter((f) => f.unmatched)
+      if (unmatched.length > 0) {
+        setUnmatchedList(unmatched)
+        setUnmatchedOpen(true)
+      }
     } catch (err) {
       toast.error(err.message || 'Could not list the Drive folder')
       setPickerOpen(false)
     } finally {
       setPickerLoading(false)
+    }
+  }
+
+  const handleDeleteUnmatched = async () => {
+    setDeletingUnmatched(true)
+    try {
+      await Promise.all(unmatchedList.map((f) => deletePendingDriveFile(f.id)))
+      const removedIds = new Set(unmatchedList.map((f) => f.id))
+      setPickerFiles((prev) => prev.filter((f) => !removedIds.has(f.id)))
+      setPickerSelected((prev) => {
+        const next = new Set(prev)
+        removedIds.forEach((id) => next.delete(id))
+        return next
+      })
+      toast.success(`Moved ${unmatchedList.length} ` +
+        `file${unmatchedList.length === 1 ? '' : 's'} to Drive's Trash`)
+      setUnmatchedOpen(false)
+      setUnmatchedList([])
+    } catch (err) {
+      toast.error(err.message || 'Could not delete all of them')
+    } finally {
+      setDeletingUnmatched(false)
     }
   }
 
@@ -1609,6 +1648,16 @@ export default function ImportPage() {
                         />
                         <span className="text-sm text-slate-700 font-mono truncate">{f.name}</span>
                       </label>
+                      {f.unmatched && (
+                        <span
+                          title={f.reason}
+                          className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5
+                                     rounded-full text-[11px] font-medium bg-red-50
+                                     text-red-700 border border-red-100"
+                        >
+                          <AlertCircle className="h-3 w-3" />No bank match
+                        </span>
+                      )}
                       {isDuplicate && (
                         <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5
                                          rounded-full text-[11px] font-medium bg-amber-50
@@ -1616,11 +1665,11 @@ export default function ImportPage() {
                           <Copy className="h-3 w-3" />Duplicate
                         </span>
                       )}
-                      {isDuplicate && (
+                      {(isDuplicate || f.unmatched) && (
                         <button
                           onClick={() => handleDeletePickerFile(f)}
                           disabled={isDeleting}
-                          title="Move this copy to Drive's Trash"
+                          title="Move this file to Drive's Trash"
                           className="shrink-0 p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40"
                         >
                           {isDeleting ? <Spinner size="sm" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -1647,6 +1696,45 @@ export default function ImportPage() {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* --- Unmatched bank accounts warning ------------------------------- */}
+      <Modal isOpen={unmatchedOpen} onClose={() => setUnmatchedOpen(false)}
+            title="Bank accounts not found" size="md">
+        <p className="text-sm text-slate-600 mb-3">
+          {unmatchedList.length} file{unmatchedList.length === 1 ? '' : 's'}{' '}
+          name a bank account that isn't in your Bank Master (or the filename
+          itself couldn't be read). Importing them would just fail the same
+          way — you can delete them from Drive now, or leave them and decide
+          later.
+        </p>
+        <div className="max-h-56 overflow-y-auto space-y-1.5 mb-4 rounded-lg border border-slate-200 p-2">
+          {unmatchedList.map((f) => (
+            <div key={f.id} className="text-xs">
+              <p className="font-mono text-slate-700 truncate">{f.name}</p>
+              <p className="text-slate-400">{f.reason}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setUnmatchedOpen(false)}
+            disabled={deletingUnmatched}
+            className="btn-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDeleteUnmatched}
+            disabled={deletingUnmatched}
+            className="btn-danger"
+          >
+            {deletingUnmatched
+              ? <Spinner size="sm" tone="white" className="mr-1.5" />
+              : <Trash2 className="h-4 w-4 mr-1.5" />}
+            Delete {unmatchedList.length}
+          </button>
+        </div>
       </Modal>
     </div>
   )
