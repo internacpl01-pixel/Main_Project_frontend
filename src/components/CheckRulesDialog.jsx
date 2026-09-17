@@ -388,18 +388,20 @@ export default function CheckRulesDialog({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="2xl" maximizable>
-      <div className="space-y-4">
+      <div className="space-y-3">
         {/* Step 1: which head, which rule, which account. Changing any of the
             three invalidates the check below it, so all three resets clear the
-            result. */}
-        <div className="grid gap-4 sm:grid-cols-3">
+            result. Compact sizing throughout this block -- three labels, three
+            selects and three hints used to run over 130px before anything
+            worth looking at (the check result) appeared at all. */}
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <label className="label flex items-center gap-2">
+            <label className="label text-xs mb-0.5 flex items-center gap-1.5">
               Head to check
               {loadingLists && <Spinner size="sm" />}
             </label>
             <select
-              className="input"
+              className="input py-1.5 text-sm"
               value={target}
               disabled={loadingLists || targets.length === 0}
               onChange={(e) => {
@@ -417,20 +419,20 @@ export default function CheckRulesDialog({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-0.5 text-[11px] text-slate-400">
               A row carries three heads and each has its own rules. One run
               judges one of them.
             </p>
           </div>
           <div>
-            <label className="label flex items-center gap-2">
+            <label className="label text-xs mb-0.5 flex items-center gap-1.5">
               Account type
               {/* Both dropdowns fill from the same two requests, so one
                   spinner covers the pair. */}
               {loadingLists && <Spinner size="sm" />}
             </label>
             <select
-              className="input"
+              className="input py-1.5 text-sm"
               value={type}
               disabled={loadingLists}
               onChange={(e) => {
@@ -462,7 +464,7 @@ export default function CheckRulesDialog({
                 )
               })}
             </select>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-0.5 text-[11px] text-slate-400">
               From the Type of Account master, as the Bank master uses it. What
               each type accepts is set on the{' '}
               <Link to="/rules" className="text-primary-600 hover:underline">
@@ -471,9 +473,9 @@ export default function CheckRulesDialog({
             </p>
           </div>
           <div>
-            <label className="label">Account number</label>
+            <label className="label text-xs mb-0.5">Account number</label>
             <select
-              className="input"
+              className="input py-1.5 text-sm"
               value={account}
               disabled={!type || loadingLists}
               onChange={(e) => {
@@ -498,7 +500,7 @@ export default function CheckRulesDialog({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-0.5 text-[11px] text-slate-400">
               Only {type || 'this type'}-typed accounts that have rows in staging.
             </p>
           </div>
@@ -655,7 +657,11 @@ export default function CheckRulesDialog({
                   </div>
                 </div>
 
-                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                {/* Viewport-relative rather than a fixed pixel height, so it
+                    actually uses the extra room the Maximize button gives the
+                    dialog instead of leaving it as blank space around a
+                    table stuck at the same size either way. */}
+                <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-slate-50">
                       <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
