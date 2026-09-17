@@ -1524,7 +1524,12 @@ export default function ImportPage() {
           Drive import: a Drive run's job reports one step per file, in the
           exact shape the overlay already reads a workbook's one-step-per-sheet
           progress from -- skipUploadStep drops the browser-upload line, which
-          isn't real for files that came from Drive rather than this tab. */}
+          isn't real for files that came from Drive rather than this tab.
+          realProgress is true only for an actual PDF's own page-by-page read
+          (services/pdf_import.py's parsers._progress.hook) -- a Drive run and
+          an Excel/CSV sheet (services/tabular_import.py) are both read and
+          staged without ever ticking their job, so showing a live percent for
+          either would only ever read a frozen 0% until it snapped to 100. */}
       <ImportProgressOverlay
         open={importing || driveRunning}
         fileName={driveRunning ? 'Drive folder' : (file?.name || '')}
@@ -1532,6 +1537,7 @@ export default function ImportPage() {
         progress={progress}
         stepWord={driveRunning ? 'File' : stepWord}
         skipUploadStep={driveRunning}
+        realProgress={!driveRunning && isPdf}
       />
 
       {/* --- Drive file picker -------------------------------------------- */}

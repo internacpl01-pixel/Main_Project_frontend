@@ -369,7 +369,7 @@ export default function CheckRulesDialog({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Check Rules" size="2xl" maximizable>
       <div className="space-y-4">
         {/* Step 1: which head, which rule, which account. Changing any of the
             three invalidates the check below it, so all three resets clear the

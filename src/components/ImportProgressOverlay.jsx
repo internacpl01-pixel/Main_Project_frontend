@@ -42,7 +42,7 @@ const VISIBLE_ROWS = 3
  * described while it is running — dropping the line the moment it finished
  * would shorten the list under the user and jerk everything up a row.
  */
-function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep }) {
+function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep, realProgress }) {
   const state = progress?.state
   const steps = []
 
@@ -79,7 +79,7 @@ function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUpl
       key: 'probe',
       label: 'Reading page 1 for its column header',
       status: state === 'parsing' && progress.batch_index === 0 ? 'active' : 'done',
-      percent: state === 'parsing' && progress.batch_index === 0
+      percent: state === 'parsing' && progress.batch_index === 0 && realProgress
         ? progress.percent : null,
     })
   }
@@ -108,14 +108,16 @@ function buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUpl
         ? `${Number(done.rows).toLocaleString('en-IN')} ${done.rows === 1 ? 'row' : 'rows'}`
         : null,
       status: done ? 'done' : current ? 'active' : 'pending',
-      // A Drive run's own per-file "step" has no real sub-progress -- the
-      // file is read in one request server-side with no page-by-page tick
-      // reaching this job (see routers/imports.py's from-drive runner), so
-      // reporting a number here would only ever read 0% until it snapped
-      // straight to 100 -- exactly the frozen bar this was built to avoid
-      // ("nothing is invented to fill the silence", above). A real batched
-      // PDF or workbook does tick per page/sheet, so it keeps its number.
-      percent: current && !skipUploadStep ? progress.percent : null,
+      // Only a real PDF's own page-by-page read actually ticks this job
+      // (parsers._progress.hook in services/pdf_import.py) -- a Drive run
+      // (no page-by-page tick reaches its job at all, see routers/imports.py's
+      // from-drive runner) and an Excel/CSV sheet (read and staged in one
+      // shot in services/tabular_import.py, nothing ticks it either) would
+      // both only ever report 0% and then snap straight to 100 -- exactly
+      // the frozen bar this was built to avoid ("nothing is invented to fill
+      // the silence", above). realProgress is false for both, so this stays
+      // a plain spinner with no invented number instead.
+      percent: current && realProgress ? progress.percent : null,
     })
   }
 
@@ -169,6 +171,11 @@ function StepMark({ status }) {
 
 export default function ImportProgressOverlay({
   open, fileName, uploadPct, progress, stepWord = 'Batch', skipUploadStep = false,
+  // True only for a real PDF's own page-by-page read, the one case that
+  // actually ticks this job (see the note above buildSteps' step-4 percent).
+  // Defaults true so a plain single-PDF import -- the original, still most
+  // common caller -- keeps behaving exactly as before this prop existed.
+  realProgress = true,
 }) {
   // The header-page read, remembered once seen — see buildSteps.
   const [sawProbe, setSawProbe] = useState(false)
@@ -197,19 +204,20 @@ export default function ImportProgressOverlay({
 
   if (!open) return null
 
-  const steps = buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep })
+  const steps = buildSteps({ fileName, uploadPct, progress, stepWord, sawProbe, skipUploadStep, realProgress })
   const activeIndex = Math.max(0, steps.findIndex((s) => s.status === 'active'))
   const offset = -(activeIndex - ACTIVE_SLOT) * ROW_HEIGHT
 
-  // A Drive run's overall_percent is driven off units_done/total_units, but
-  // nothing ticks those for a Drive job (see the step-percent note above) --
-  // it would sit at 0% for the whole run and jump to 100 at the very end.
-  // Files actually finished, counted straight from batches_done, is the real
-  // number for this shape of job -- the same information the step list
-  // above is drawn from, just rolled into one figure.
+  // overall_percent/percent are driven off units_done/step_done, and nothing
+  // ticks those unless realProgress is true (see the step-percent note
+  // above) -- for a Drive run or an Excel/CSV sheet it would sit at 0% for
+  // the whole run and jump to 100 at the very end. Steps actually finished,
+  // counted straight from batches_done, is the real number for that shape of
+  // job -- the same information the step list above is drawn from, just
+  // rolled into one figure.
   const overall = uploadPct !== null
     ? null
-    : skipUploadStep
+    : !realProgress
       ? Math.round(((progress?.batches_done?.length || 0) * 100) / (progress?.batch_total || 1))
       : progress?.batch_total > 1 ? progress.overall_percent : progress?.percent
   const elapsed = progress?.elapsed_ms >= 1000

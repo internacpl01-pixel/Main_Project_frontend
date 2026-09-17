@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Maximize2, Minimize2 } from 'lucide-react'
 
 // `tone` and not a colour in `className`: Tailwind emits its utilities in its
 // own order, so a text-white passed by a caller does not reliably beat the
@@ -168,7 +168,18 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, conf
   )
 }
 
-export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+export function Modal({ isOpen, onClose, title, children, size = 'md', maximizable = false }) {
+  // Own state, not a prop from the caller -- every maximizable dialog wants
+  // the exact same toggle behaviour (start normal, remember nothing between
+  // opens), so there is nothing for a caller to actually customise here.
+  const [maximized, setMaximized] = useState(false)
+
+  // Dropped back to its normal size the moment the dialog closes, so
+  // reopening it later (Check Rules, picked again on a different account)
+  // starts from the same size every time rather than the size it happened
+  // to be left in.
+  useEffect(() => { if (!isOpen) setMaximized(false) }, [isOpen])
+
   if (!isOpen) return null
   // '2xl' exists for the Check Rules dialog, which shows a table whose columns
   // the user chooses — at max-w-4xl a narration plus two picked columns had
@@ -180,15 +191,30 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-white rounded-xl shadow-xl w-full ${sizes[size]} max-h-[85vh] flex flex-col`}>
+      <div className={`relative bg-white rounded-xl shadow-xl w-full flex flex-col transition-all ${
+        maximized ? 'max-w-[95vw] h-[95vh]' : `${sizes[size]} max-h-[85vh]`
+      }`}>
         {title && (
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-1">
+              {maximizable && (
+                <button
+                  onClick={() => setMaximized((v) => !v)}
+                  title={maximized ? 'Restore' : 'Maximize'}
+                  className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  {maximized
+                    ? <Minimize2 className="h-4 w-4" />
+                    : <Maximize2 className="h-4 w-4" />}
+                </button>
+              )}
+              <button onClick={onClose} className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
         <div className="overflow-y-auto px-6 py-4 flex-1">{children}</div>
