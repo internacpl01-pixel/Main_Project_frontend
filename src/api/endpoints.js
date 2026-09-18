@@ -702,10 +702,18 @@ export async function listDriveFiles() {
   return data.files || []
 }
 
-// Trashes one not-yet-imported Drive file -- for discarding a duplicate
-// copy straight from the picker. See DELETE /imports/drive-files/{id}.
-export async function deletePendingDriveFile(fileId) {
-  await api.delete(`/imports/drive-files/${encodeURIComponent(fileId)}`)
+// Sets one not-yet-imported Drive file aside: renames it "..._bank_absent"
+// so it stops showing in the picker, leaving the file itself untouched in
+// Drive. Replaced a delete button -- "no bank account matches this" is a
+// Master Data gap, not a reason to throw a real statement away.
+//
+// There is nothing to undo afterwards: listDriveFiles re-reads the bank out
+// of the name every time, so adding the missing account brings the file
+// straight back into the list (flagged `restored`).
+export async function skipDriveFile(fileId) {
+  const { data } = await api.post(
+    `/imports/drive-files/${encodeURIComponent(fileId)}/skip`)
+  return data
 }
 
 // The permanent history behind DriveImportLogPage -- every outcome
