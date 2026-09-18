@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth, MANAGER } from '../context/AuthContext.jsx'
 import {
   getDriveFolderSettings, updateDriveFolderSettings, updateDriveImportFolder,
-  fetchUsers,
+  verifyDriveFolder, fetchUsers,
 } from '../api/endpoints.js'
 import ChangePasswordDialog from '../components/ChangePasswordDialog.jsx'
 import DriveCleanupPanel from '../components/DriveCleanupPanel.jsx'
@@ -13,6 +13,7 @@ import toast from 'react-hot-toast'
 import {
   KeyRound, LogOut, ChevronDown, Building2, Users as UsersIcon, HardDrive,
   Mail, Trash2, Check, X, Pencil, Info, Link2, CornerDownRight,
+  ShieldCheck, CheckCircle2, AlertCircle,
 } from 'lucide-react'
 
 // Mirrors UsersPage's own ROLE_BADGES -- kept as a small local copy rather
@@ -138,10 +139,43 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
+  // What the last successful check found: { folder_id, name, file_count }.
+  // Save is gated on this being present, so nothing can be stored that
+  // hasn't been opened and shown to the person first.
+  const [checked, setChecked] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [checkError, setCheckError] = useState('')
 
   const start = () => {
     setValue(folderId ? FOLDER_URL + folderId : '')
+    setChecked(null)
+    setCheckError('')
     setEditing(true)
+  }
+
+  // Any edit invalidates the check. Otherwise someone could verify one
+  // link, paste a different one over it, and save the second on the first
+  // one's evidence -- which is exactly the mistake verifying is meant to
+  // catch.
+  const edit = (next) => {
+    setValue(next)
+    setChecked(null)
+    setCheckError('')
+  }
+
+  const verify = async () => {
+    const url = value.trim()
+    if (!url) { setCheckError('Paste the folder link first.'); return }
+    setChecking(true)
+    setCheckError('')
+    try {
+      setChecked(await verifyDriveFolder(url))
+    } catch (err) {
+      setChecked(null)
+      setCheckError(err.message || 'Could not open that folder.')
+    } finally {
+      setChecking(false)
+    }
   }
 
   const save = async () => {
@@ -149,6 +183,7 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
     try {
       await onSave(value.trim())
       setEditing(false)
+      setChecked(null)
     } finally {
       setSaving(false)
     }
@@ -159,6 +194,7 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
     try {
       await onClear()
       setEditing(false)
+      setChecked(null)
     } finally {
       setSaving(false)
     }
@@ -198,15 +234,35 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
           <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => edit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !checked) verify() }}
             autoComplete="off"
             autoFocus
             placeholder={placeholder}
-            className="input pl-9 font-mono text-xs"
+            className={`input pl-9 font-mono text-xs ${
+              checkError ? 'border-red-300 focus:ring-red-200' : ''
+            } ${checked ? 'border-emerald-300 focus:ring-emerald-200' : ''}`}
             disabled={saving}
           />
         </div>
-        <button onClick={save} disabled={saving} className="btn-primary shrink-0">
+        {/* Verify first, save second: Save stays disabled until this folder
+            has actually been opened, so the only thing that can be stored
+            is something already shown to be real. */}
+        <button
+          onClick={verify}
+          disabled={checking || saving || !value.trim()}
+          className="btn-secondary shrink-0"
+        >
+          {checking
+            ? <><Spinner size="sm" className="mr-1.5" />Checking...</>
+            : <><ShieldCheck className="h-4 w-4 mr-1.5" />Verify</>}
+        </button>
+        <button
+          onClick={save}
+          disabled={saving || !checked}
+          title={checked ? undefined : 'Verify the link first'}
+          className="btn-primary shrink-0"
+        >
           {saving ? <Spinner size="sm" tone="white" /> : <><Check className="h-4 w-4 mr-1" />Save</>}
         </button>
         <button
@@ -217,10 +273,34 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
           <X className="h-4 w-4 mr-1" />Cancel
         </button>
       </div>
-      <p className="mt-1.5 text-xs text-slate-400">
-        Open the folder in Drive and copy the whole address bar — the folder
-        ID is pulled out of it. A bare ID works too.
-      </p>
+
+      {checked ? (
+        <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <p className="text-xs text-emerald-800 flex items-start gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-px" />
+            <span>
+              Folder found:{' '}
+              <span className="font-semibold">{checked.name}</span>
+              {' · '}
+              {checked.file_count} file{checked.file_count === 1 ? '' : 's'} inside.
+              {' '}Check this is the right one, then save.
+            </span>
+          </p>
+        </div>
+      ) : checkError ? (
+        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+          <p className="text-xs text-red-700 flex items-start gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />
+            {checkError}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-1.5 text-xs text-slate-400">
+          Open the folder in Drive and copy the whole address bar — the folder
+          ID is pulled out of it. A bare ID works too. Verify it before saving.
+        </p>
+      )}
+
       {onClear && (
         <button
           onClick={clear}

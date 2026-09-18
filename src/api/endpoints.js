@@ -752,6 +752,19 @@ export async function getDriveFolderSettings() {
   return data
 }
 
+// Checks a pasted Drive folder link without saving anything -- returns
+// { folder_id, name, file_count } so a person can confirm it is the folder
+// they meant before committing to it. A well-formed link to the WRONG
+// folder passes every check the save path can make by itself; the name and
+// file count are what catch that. Safe to call as often as the box is
+// edited: it writes nothing.
+export async function verifyDriveFolder(url) {
+  const form = new FormData()
+  form.append('url', url)
+  const { data } = await api.post('/imports/drive-folder/verify', form)
+  return data
+}
+
 // Changes the EXPORT folder. Takes a pasted Drive folder URL or a bare id.
 // The backend also pushes the new value to the Gmail Apps Script's own web
 // app so the two stay in sync -- see PUT /imports/drive-settings. This does
