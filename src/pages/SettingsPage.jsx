@@ -39,30 +39,60 @@ const FOLDER_URL = 'https://drive.google.com/drive/folders/'
  * answers the question most visits are actually asking (which folder? how
  * many people?) without being opened at all.
  */
-function Section({ icon, title, summary, badge, defaultOpen = false, children }) {
+// `tone="danger"` is for a section whose contents destroy something. Marked
+// on the closed header rather than only inside, so what it does is visible
+// without opening it -- the same reason the summary line is there.
+const SECTION_TONES = {
+  slate: {
+    card: '',
+    tile: 'bg-slate-100 text-slate-500',
+    title: 'text-slate-900',
+    summary: 'text-slate-500',
+    hover: 'hover:bg-slate-50',
+  },
+  danger: {
+    card: 'border-red-100',
+    tile: 'bg-red-50 text-red-600',
+    title: 'text-red-700',
+    summary: 'text-red-600/70',
+    hover: 'hover:bg-red-50/50',
+  },
+}
+
+function Section({ icon, title, summary, badge, tone = 'slate',
+                   defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen)
+  const t = SECTION_TONES[tone] || SECTION_TONES.slate
   return (
-    <div className="card mb-4 overflow-hidden">
+    <div className={`card mb-4 overflow-hidden ${t.card}`}>
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 transition-colors"
+        className={`w-full flex items-center gap-3 px-5 py-4 text-left transition-colors ${t.hover}`}
       >
-        <div className="h-9 w-9 shrink-0 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center">
+        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${t.tile}`}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-slate-900">{title}</p>
+            <p className={`text-sm font-semibold ${t.title}`}>{title}</p>
             {badge}
           </div>
-          <p className="text-xs text-slate-500 truncate">{summary}</p>
+          <p className={`text-xs truncate ${t.summary}`}>{summary}</p>
         </div>
         <ChevronDown
-          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`h-4 w-4 shrink-0 transition-transform ${
+            tone === 'danger' ? 'text-red-400' : 'text-slate-400'
+          } ${open ? 'rotate-180' : ''}`}
         />
       </button>
-      {open && <div className="border-t border-slate-100 px-5 py-5">{children}</div>}
+      {open && (
+        <div className={`border-t px-5 py-5 ${
+          tone === 'danger' ? 'border-red-100' : 'border-slate-100'
+        }`}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -457,6 +487,7 @@ export default function SettingsPage() {
             icon={<Trash2 className="h-4 w-4" />}
             title="Clean up old statements"
             summary="Move already-imported statements out of the import folder once they're old enough."
+            tone="danger"
           >
             <DriveCleanupPanel />
           </Section>
