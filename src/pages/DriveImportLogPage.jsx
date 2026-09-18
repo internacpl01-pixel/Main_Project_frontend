@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { fetchDriveImportLog, cleanupDriveDoneFiles } from '../api/endpoints.js'
+import { fetchDriveImportLog, listDriveFolders } from '../api/endpoints.js'
 import {
-  EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows, ConfirmDialog,
+  EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows,
 } from '../components/UI.jsx'
+import DriveCleanupPanel from '../components/DriveCleanupPanel.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
@@ -12,11 +13,6 @@ import {
 
 // `all` is the absence of a filter, not a value the server knows.
 const STATUSES = ['all', 'done', 'failed', 'password_required', 'skipped']
-
-// A fixed list rather than free text -- the days figure only ever needs to
-// be "roughly how long", and a dropdown can't be typo'd into 9000 or left
-// blank the way a text box could.
-const CLEANUP_DAY_OPTIONS = [30, 60, 90, 180, 365]
 
 const STATUS_STYLE = {
   done: 'bg-emerald-50 text-emerald-700 border-emerald-100',
@@ -64,14 +60,18 @@ export default function DriveImportLogPage() {
   const [limit, setLimit] = useState(50)
 
   // Cleanup: trashes "_done" Drive files whose own statement date is older
-  // than this many days. cleanupOpen just shows the days input; confirmOpen
-  // is the separate "are you sure" step -- this changes real Drive state
-  // (even if Trash keeps it recoverable for a while), so it gets the same
-  // two-step confirm as discarding a batch elsewhere in this app.
+  // than this many days. The panel itself (DriveCleanupPanel, shared with
+  // the Settings page) owns the days figure and its own confirm step --
+  // this only decides whether it is on screen.
   const [cleanupOpen, setCleanupOpen] = useState(false)
-  const [cleanupDays, setCleanupDays] = useState('90')
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [cleaningUp, setCleaningUp] = useState(false)
+  // Only to offer the extra saved folders as cleanup targets; the log itself
+  // is not per-folder.
+  const [folders, setFolders] = useState([])
+
+  useEffect(() => {
+    if (!canWrite) return
+    listDriveFolders().then((f) => setFolders(Array.isArray(f) ? f : [])).catch(() => {})
+  }, [canWrite])
 
   useEffect(() => {
     const t = setTimeout(() => { setQuery(search); setPage(1) }, 300)
@@ -108,25 +108,6 @@ export default function DriveImportLogPage() {
     setStatus('all'); setSearch(''); setDateFrom(''); setDateTo(''); setPage(1)
   }
 
-  const daysValid = /^\d+$/.test(cleanupDays) && Number(cleanupDays) >= 1
-
-  const runCleanup = async () => {
-    setCleaningUp(true)
-    try {
-      const res = await cleanupDriveDoneFiles(Number(cleanupDays))
-      setConfirmOpen(false)
-      setCleanupOpen(false)
-      toast.success(res.count > 0
-        ? `Moved ${res.count} old statement${res.count === 1 ? '' : 's'} to Drive's Trash`
-        : `Nothing older than ${cleanupDays} days to clean up`)
-      load()
-    } catch (err) {
-      toast.error(err.message || 'Could not clean up the Drive folder')
-    } finally {
-      setCleaningUp(false)
-    }
-  }
-
   return (
     <div>
       <PageHeader
@@ -140,79 +121,14 @@ export default function DriveImportLogPage() {
       />
 
       {cleanupOpen && (
-        <div className="card mb-4 border-primary-100 bg-gradient-to-br from-primary-50/60 to-white">
-          <div className="card-body">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div className="flex items-end gap-3">
-                <div className="h-10 w-10 shrink-0 rounded-lg bg-primary-100 text-primary-600 flex items-center justify-center">
-                  <Trash2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <label className="label mb-1.5">
-                    Move "Done" statements older than
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={cleanupDays}
-                      onChange={(e) => setCleanupDays(e.target.value.replace(/[^\d]/g, ''))}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="90"
-                      className={`input w-24 bg-white ${!daysValid ? 'border-red-300 focus:ring-red-200' : ''}`}
-                    />
-                    <span className="text-sm text-slate-600">days, or</span>
-                    <select
-                      // Purely a shortcut into the input above -- it never
-                      // holds a value of its own, so picking the same preset
-                      // twice in a row still fires the change and updates
-                      // cleanupDays each time.
-                      value=""
-                      onChange={(e) => e.target.value && setCleanupDays(e.target.value)}
-                      className="input w-36 bg-white"
-                    >
-                      <option value="" disabled>Quick pick...</option>
-                      {CLEANUP_DAY_OPTIONS.map((d) => (
-                        <option key={d} value={d}>{d} days</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setConfirmOpen(true)}
-                  disabled={!daysValid}
-                  className="btn-primary"
-                >
-                  <Trash2 className="h-4 w-4 mr-1.5" />Clean up
-                </button>
-                <button onClick={() => setCleanupOpen(false)} className="btn-secondary">
-                  <X className="h-4 w-4 mr-1.5" />Cancel
-                </button>
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-primary-900/60">
-              Judged by the statement's own date, not when it was imported.
-              Only files already marked "_done" are touched — a failed or
-              password-waiting file is left alone no matter how old it is.
-              Moved to Drive's own Trash, recoverable there for about 30 days,
-              not deleted outright.
-            </p>
-          </div>
+        <div className="mb-4">
+          <DriveCleanupPanel
+            folders={folders}
+            onCancel={() => setCleanupOpen(false)}
+            onDone={() => { setCleanupOpen(false); load() }}
+          />
         </div>
       )}
-
-      <ConfirmDialog
-        isOpen={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={runCleanup}
-        title="Clean up old Drive statements?"
-        message={`Every "_done" file whose own statement date is more than ${cleanupDays} days old will be moved to Drive's Trash. This can't be undone from here — recovery would be through Drive's own Trash directly.`}
-        confirmText="Move to Trash"
-        danger
-        busy={cleaningUp}
-      />
 
       <div className="card mb-4">
         <div className="card-body space-y-3">

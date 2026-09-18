@@ -36,7 +36,7 @@ const hasLevelValue = (level, required) => level <= required
 
 const emptyForm = { username: '', password: '', role: 'staff' }
 
-export default function UsersPage() {
+export default function UsersPage({ embedded = false, onCount }) {
   const { user, level, hasLevel } = useAuth()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -72,7 +72,11 @@ export default function UsersPage() {
     setLoading(true)
     setError('')
     try {
-      setItems(await fetchUsers())
+      const list = await fetchUsers()
+      setItems(list)
+      // Lets the Settings page label its collapsed Team section with a real
+      // member count instead of fetching the same list a second time.
+      onCount?.(list.length)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -230,20 +234,28 @@ export default function UsersPage() {
     }
   }
 
+  const addButton = creatableRoles.length > 0 && (
+    <button onClick={openCreate} className="btn-primary">
+      <Plus className="h-4 w-4 mr-1.5" />
+      Add User
+    </button>
+  )
+
   return (
     <div>
-      <PageHeader
-        title="Users"
-        description={`Accounts for ${user?.schema || 'this company'}. You can manage anyone below your own level.`}
-        actions={
-          creatableRoles.length > 0 && (
-            <button onClick={openCreate} className="btn-primary">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Add User
-            </button>
-          )
-        }
-      />
+      {/* `embedded` is the Settings page's Team section, which supplies its
+          own heading — a second "Users" title inside it would just repeat
+          the section it is already sitting under. Everything else about the
+          page is identical there, including who may edit whom. */}
+      {embedded ? (
+        addButton && <div className="mb-3 flex justify-end">{addButton}</div>
+      ) : (
+        <PageHeader
+          title="Users"
+          description={`Accounts for ${user?.schema || 'this company'}. You can manage anyone below your own level.`}
+          actions={addButton}
+        />
+      )}
 
       {error && <EmptyState title="Error" description={error} />}
 

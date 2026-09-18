@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
-  getDriveFolderSettings, updateDriveFolderSettings, listDriveFiles,
+  getDriveFolderSettings, listDriveFolders, listDriveFiles,
   deletePendingDriveFile,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
@@ -11,7 +11,7 @@ import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers, HardDrive, Settings, Check, Search, Trash2, Copy,
+  Layers, HardDrive, Search, Trash2, Copy,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -126,13 +126,16 @@ export default function ImportPage() {
   // A "password_required" Drive row's own password box, keyed by filename.
   // { [name]: { value, busy } }
   const [drivePwRetry, setDrivePwRetry] = useState({})
-  // The Drive folder ID (routers/imports.py's /imports/drive-settings), shown
-  // and editable from this page instead of the Apps Script's own web app —
-  // folderIdInput only exists while the field is open for editing.
+  // Which Drive folder this run reads. '' is the Gmail folder — the one
+  // drive_settings holds and the Apps Script writes into — and stays the
+  // default. driveFolders are the extra folders someone has saved under
+  // Settings; picking one imports from there instead, without touching the
+  // Apps Script's own target. Read-only here on purpose: adding, renaming
+  // and changing folders all live on the Settings page, so there is one
+  // place that decides where statements may come from rather than two.
   const [folderId, setFolderId] = useState('')
-  const [editingFolder, setEditingFolder] = useState(false)
-  const [folderIdInput, setFolderIdInput] = useState('')
-  const [savingFolder, setSavingFolder] = useState(false)
+  const [driveFolders, setDriveFolders] = useState([])
+  const [driveSource, setDriveSource] = useState('')
   // The file-picker modal shown before a Drive run actually starts, so a
   // person can import just one or a few files instead of always sweeping
   // the whole pending list. pickerFiles is [{id, name}, ...]; selection and
@@ -165,26 +168,17 @@ export default function ImportPage() {
     getDriveFolderSettings()
       .then((r) => setFolderId(r.folder_id || ''))
       .catch(() => {})
+    listDriveFolders()
+      .then((f) => setDriveFolders(Array.isArray(f) ? f : []))
+      .catch(() => {})
   }, [])
 
-  const startEditFolder = () => { setFolderIdInput(folderId); setEditingFolder(true) }
-  const cancelEditFolder = () => setEditingFolder(false)
-
-  const saveFolderId = async () => {
-    const value = folderIdInput.trim()
-    if (!value) { toast.error('Folder ID cannot be empty.'); return }
-    setSavingFolder(true)
-    try {
-      const res = await updateDriveFolderSettings(value)
-      setFolderId(res.folder_id)
-      setEditingFolder(false)
-      toast.success('Drive folder updated')
-    } catch (err) {
-      toast.error(err.message || 'Could not update the Drive folder')
-    } finally {
-      setSavingFolder(false)
-    }
-  }
+  // What the chosen source is called, for the picker heading and the
+  // progress overlay — "Drive folder" alone stops meaning anything once
+  // there is more than one of them.
+  const driveSourceLabel = driveSource
+    ? (driveFolders.find((f) => f.folder_id === driveSource)?.label || 'Drive folder')
+    : 'Gmail statements folder'
 
   const handleFile = useCallback(async (f) => {
     if (!f) return
@@ -344,7 +338,7 @@ export default function ImportPage() {
     setPickerLoading(true)
     setPickerSearch('')
     try {
-      const list = await listDriveFiles()
+      const list = await listDriveFiles(driveSource)
       setPickerFiles(list)
       setPickerSelected(new Set(list.map((f) => f.id)))   // select all by default
 
@@ -368,7 +362,8 @@ export default function ImportPage() {
   const handleDeleteUnmatched = async () => {
     setDeletingUnmatched(true)
     try {
-      await Promise.all(unmatchedList.map((f) => deletePendingDriveFile(f.id)))
+      await Promise.all(
+        unmatchedList.map((f) => deletePendingDriveFile(f.id, driveSource)))
       const removedIds = new Set(unmatchedList.map((f) => f.id))
       setPickerFiles((prev) => prev.filter((f) => !removedIds.has(f.id)))
       setPickerSelected((prev) => {
@@ -430,7 +425,7 @@ export default function ImportPage() {
   const handleDeletePickerFile = async (file) => {
     setPickerDeleting((prev) => new Set(prev).add(file.id))
     try {
-      await deletePendingDriveFile(file.id)
+      await deletePendingDriveFile(file.id, driveSource)
       setPickerFiles((prev) => prev.filter((f) => f.id !== file.id))
       setPickerSelected((prev) => {
         const next = new Set(prev); next.delete(file.id); return next
@@ -458,7 +453,7 @@ export default function ImportPage() {
     try {
       const jobId = await startDriveImportJob(
         pages.trim(), batchPages.trim() === '' ? null : Number(batchPages),
-        selectedFiles)
+        selectedFiles, driveSource)
       // Reuses the same `progress` state the single-file and batch flows
       // already drive ImportProgressOverlay from -- a Drive run reports
       // itself in the exact same step shape (one step per file here, the
@@ -495,7 +490,7 @@ export default function ImportPage() {
     if (!entry?.value) return
     setDrivePwRetry((prev) => ({ ...prev, [fileName]: { ...prev[fileName], busy: true } }))
     try {
-      const res = await retryDriveFileWithPassword(fileName, entry.value)
+      const res = await retryDriveFileWithPassword(fileName, entry.value, driveSource)
       setDriveResults((prev) => ({
         ...prev,
         imported: prev.imported + 1,
@@ -683,67 +678,40 @@ export default function ImportPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-900">
-                  Import from the connected Drive folder
+                  Import from a Google Drive folder
                 </p>
                 <p className="text-xs text-slate-500">
-                  Every file a Gmail Apps Script has already copied there, not
-                  yet marked done. No bank account is attached to these rows —
-                  classify them on the Imported Rows page afterward, the same
-                  as any row a plain upload left unassigned.
+                  Which bank account each file belongs to is read off its own
+                  filename and matched server-side — nothing is chosen here.
+                  A file that can&rsquo;t be matched is left for you rather
+                  than imported unassigned.
                 </p>
               </div>
             </div>
 
             <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-              {editingFolder ? (
-                <div>
-                  <label className="label">Drive Folder ID</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={folderIdInput}
-                      onChange={(e) => setFolderIdInput(e.target.value)}
-                      autoComplete="off"
-                      autoFocus
-                      placeholder="e.g. 1SutmDSaEILMkCJWf6Htx5p5WWJ11YuvR"
-                      className="input flex-1 font-mono text-xs"
-                      disabled={savingFolder}
-                    />
-                    <button
-                      onClick={saveFolderId}
-                      disabled={savingFolder}
-                      className="btn-primary shrink-0"
-                    >
-                      {savingFolder
-                        ? <Spinner size="sm" tone="white" />
-                        : <><Check className="h-4 w-4 mr-1" />Save</>}
-                    </button>
-                    <button
-                      onClick={cancelEditFolder}
-                      disabled={savingFolder}
-                      className="btn-secondary shrink-0"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    This also updates the Gmail Apps Script itself, so it
-                    keeps saving statements into the same folder this reads
-                    from.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-slate-500">Drive Folder ID</p>
-                    <p className="text-sm font-mono text-slate-800 truncate">
-                      {folderId || 'Not set'}
-                    </p>
-                  </div>
-                  <button onClick={startEditFolder} className="btn-secondary shrink-0">
-                    <Settings className="h-3.5 w-3.5 mr-1.5" />Change
-                  </button>
-                </div>
-              )}
+              <label className="label">Source folder</label>
+              <select
+                value={driveSource}
+                onChange={(e) => setDriveSource(e.target.value)}
+                disabled={driveRunning}
+                className="input"
+              >
+                <option value="">
+                  Gmail statements folder{folderId ? '' : ' — not set up yet'}
+                </option>
+                {driveFolders.map((f) => (
+                  <option key={f.id} value={f.folder_id}>{f.label}</option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-xs text-slate-500 flex items-start gap-1">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-px text-slate-400" />
+                {driveSource
+                  ? 'A folder you added yourself. The Gmail Apps Script does '
+                    + 'not write here — it only fills the folder above.'
+                  : 'Filled automatically by the Gmail Apps Script. '
+                    + 'Add another folder, or change this one, under Settings.'}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
@@ -1571,7 +1539,7 @@ export default function ImportPage() {
           either would only ever read a frozen 0% until it snapped to 100. */}
       <ImportProgressOverlay
         open={importing || driveRunning}
-        fileName={driveRunning ? 'Drive folder' : (file?.name || '')}
+        fileName={driveRunning ? driveSourceLabel : (file?.name || '')}
         uploadPct={driveRunning ? null : uploadPct}
         progress={progress}
         stepWord={driveRunning ? 'File' : stepWord}
@@ -1581,7 +1549,7 @@ export default function ImportPage() {
 
       {/* --- Drive file picker -------------------------------------------- */}
       <Modal isOpen={pickerOpen} onClose={() => setPickerOpen(false)}
-            title="Select files to import" size="lg">
+            title={`Select files to import — ${driveSourceLabel}`} size="lg">
         {pickerLoading ? (
           <div className="py-10 flex justify-center"><Spinner /></div>
         ) : pickerFiles.length === 0 ? (
