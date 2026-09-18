@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { fetchFarvisionVerifyRows, resolveFarvisionVerifyRow, exportFarvisionViaJob } from '../api/endpoints.js'
+import {
+  fetchFarvisionVerifyRows, fetchFarvisionVerifyCandidates,
+  resolveFarvisionVerifyRow, exportFarvisionViaJob,
+} from '../api/endpoints.js'
 import { Spinner, EmptyState, SearchableSelect } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2, Check } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
 
@@ -20,7 +23,10 @@ const showValue = (v) => {
 // this review step looks at exactly the same rows that button used to export
 // directly -- confirmed with the user. Landing on this page with no filters
 // (e.g. a bookmarked URL) just reviews every row across every batch, the same
-// way export-farvision itself falls back to no filter.
+// way export-farvision itself falls back to no filter -- a page at a time
+// here, though: matching every row against the Account Head master is real
+// work, so this page fetches 50 at a time (see load/page below) rather than
+// the whole filtered set in one request the way the export itself still does.
 //
 // Every Farvision export column is shown, not just Narration/Account Head --
 // confirmed with the user: this reviews the row the export will actually
@@ -39,6 +45,19 @@ export default function FarvisionVerifyPage() {
   const [columns, setColumns] = useState([])
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  // Server-paginated (services/farvision.py matches each row against a
+  // ~7,900-row Account Head master -- doing that for a whole batch just to
+  // show one screen of it was measured at 10+ seconds and several megabytes
+  // for a 253-row batch). page is 1-based to match the API; total/pageSize
+  // come back with each response, since page 1 always knows both.
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
+  // The full Account Head / Bank Name pools, fetched once (cached across
+  // pages and re-visits -- see fetchFarvisionVerifyCandidates) rather than
+  // repeated on every row: a row whose own "options" comes back null falls
+  // back to this instead.
+  const [candidates, setCandidates] = useState({ bank_names: [], account_heads: {} })
   // null, or which kind is currently downloading -- so each button shows its
   // own spinner instead of both greying out for one export.
   const [exporting, setExporting] = useState(null)
@@ -57,19 +76,50 @@ export default function FarvisionVerifyPage() {
   // server.
   const [skipped, setSkipped] = useState(() => new Set())
 
-  const load = () => {
+  const load = (targetPage = page) => {
     setLoading(true)
-    fetchFarvisionVerifyRows(filters)
+    fetchFarvisionVerifyRows({ ...filters, page: targetPage })
       .then((data) => {
         setColumns(Array.isArray(data?.columns) ? data.columns : [])
         setRows(Array.isArray(data?.rows) ? data.rows : [])
+        setTotal(Number.isFinite(data?.total) ? data.total : 0)
+        setPageSize(Number.isFinite(data?.page_size) ? data.page_size : pageSize)
+        setPage(targetPage)
+        // A row's own overrides/skips are page-local -- landing on a new
+        // page starts clean rather than carrying stale state for ids that
+        // are no longer even on screen.
+        setRowState({})
+        setOverriding(new Set())
+        setSkipped(new Set())
       })
       .catch((err) => toast.error(err.message))
       .finally(() => setLoading(false))
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load(1)
+    fetchFarvisionVerifyCandidates()
+      .then((data) => setCandidates({
+        bank_names: Array.isArray(data?.bank_names) ? data.bank_names : [],
+        account_heads: data?.account_heads && typeof data.account_heads === 'object'
+          ? data.account_heads : {},
+      }))
+      .catch((err) => toast.error(err.message))
+  }, [])
+
+  // A row's own "options" (services/farvision.py's fetch_rows) is null when
+  // it had nothing more specific to offer -- the shared pool fetched once
+  // above is what a dropdown falls back to then, keyed by whether this is an
+  // Internal-transfer row (Bank Names) or a normal one (this row's own
+  // company's Account Heads).
+  const optionsFor = (row) => {
+    if (Array.isArray(row.options)) return row.options
+    if (row.internal) return candidates.bank_names
+    return candidates.account_heads[row.company] || []
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / (pageSize || 1)))
 
   const handleResolve = async (row, accountHead) => {
     if (!accountHead) return
@@ -150,7 +200,10 @@ export default function FarvisionVerifyPage() {
     }
   }
 
-  const needsReview = rows.filter((r) => !r.matched).length
+  // Page-local -- this page no longer loads every row up front, so this can
+  // only speak for what's on screen, not the whole filtered batch. "total"
+  // (from the server, a plain count -- no matching needed) covers the batch.
+  const needsReviewOnPage = rows.filter((r) => !r.matched).length
 
   return (
     <div>
@@ -192,9 +245,10 @@ export default function FarvisionVerifyPage() {
 
       {!loading && rows.length > 0 && (
         <p className="text-sm text-slate-500 mb-3">
-          {needsReview === 0
-            ? `All ${rows.length} rows have an Account Head.`
-            : `${needsReview} of ${rows.length} rows need a decision (blank or conflicting).`}
+          {`Page ${page} of ${totalPages} — ${total} rows in total. `}
+          {needsReviewOnPage === 0
+            ? 'All rows on this page have an Account Head.'
+            : `${needsReviewOnPage} of ${rows.length} on this page need a decision (blank or conflicting).`}
         </p>
       )}
 
@@ -254,7 +308,7 @@ export default function FarvisionVerifyPage() {
                             ) : showDropdown ? (
                               <div className="flex items-center gap-2">
                                 <SearchableSelect
-                                  options={row.options}
+                                  options={optionsFor(row)}
                                   value=""
                                   onChange={(opt) => handleResolve(row, opt)}
                                   disabled={state === 'saving'}
@@ -319,6 +373,28 @@ export default function FarvisionVerifyPage() {
           </div>
         )}
       </div>
+
+      {!loading && rows.length > 0 && (
+        <div className="flex items-center justify-between mt-4">
+          <button
+            onClick={() => load(page - 1)}
+            disabled={page <= 1}
+            className="btn-secondary"
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Previous
+          </button>
+          <span className="text-sm text-slate-500">Page {page} of {totalPages}</span>
+          <button
+            onClick={() => load(page + 1)}
+            disabled={page >= totalPages}
+            className="btn-secondary"
+          >
+            Next
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -922,6 +922,15 @@ export async function fetchFarvisionVerifyRows(params = {}) {
   return data
 }
 
+// The full Account Head / Bank Name pools, fetched once and cached (see
+// cachedGet above) rather than once per page -- a row whose own "options"
+// came back null (services/farvision.py's fetch_rows leaves it null when it
+// has nothing more specific to offer) falls back to this instead of the
+// server repeating the whole ~7,900-row master onto every such row.
+export async function fetchFarvisionVerifyCandidates() {
+  return cachedGet('/transactions/temp-trans/farvision-verify/candidates')
+}
+
 export async function resolveFarvisionVerifyRow(id, accountHead) {
   const { data } = await api.post('/transactions/temp-trans/farvision-verify/resolve', {
     id, account_head: accountHead,
