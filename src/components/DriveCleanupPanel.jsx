@@ -21,25 +21,23 @@ const CLEANUP_DAY_OPTIONS = [30, 60, 90, 180, 365]
  * drift, and the copy someone hadn't looked at recently would be the one
  * with the weaker warning.
  *
- * `folders` are the saved extra folders (listDriveFolders). When there are
- * any, a folder selector appears; with none, this silently targets the
- * configured Gmail folder exactly as it did before extra folders existed.
+ * Always acts on the company's IMPORT folder -- the one Settings says
+ * imports read -- because that is where the "_done" files it prunes are
+ * created. It takes no folder argument for the same reason the import
+ * itself doesn't: one setting decides which folder is in play, so this can
+ * never quietly act on a different one than the last import did.
  */
-export default function DriveCleanupPanel({ onCancel, onDone, folders = [] }) {
+export default function DriveCleanupPanel({ onCancel, onDone }) {
   const [days, setDays] = useState('90')
-  const [folderId, setFolderId] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const daysValid = /^\d+$/.test(days) && Number(days) >= 1
-  const folderLabel = folderId
-    ? (folders.find((f) => f.folder_id === folderId)?.label || 'that folder')
-    : 'the Gmail statements folder'
 
   const run = async () => {
     setBusy(true)
     try {
-      const res = await cleanupDriveDoneFiles(Number(days), folderId)
+      const res = await cleanupDriveDoneFiles(Number(days))
       setConfirmOpen(false)
       toast.success(res.count > 0
         ? `Moved ${res.count} old statement${res.count === 1 ? '' : 's'} to Drive's Trash`
@@ -87,21 +85,6 @@ export default function DriveCleanupPanel({ onCancel, onDone, folders = [] }) {
                     <option key={d} value={d}>{d} days</option>
                   ))}
                 </select>
-                {folders.length > 0 && (
-                  <>
-                    <span className="text-sm text-slate-600">in</span>
-                    <select
-                      value={folderId}
-                      onChange={(e) => setFolderId(e.target.value)}
-                      className="input w-56 bg-white"
-                    >
-                      <option value="">Gmail statements folder</option>
-                      {folders.map((f) => (
-                        <option key={f.id} value={f.folder_id}>{f.label}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -135,7 +118,7 @@ export default function DriveCleanupPanel({ onCancel, onDone, folders = [] }) {
         onClose={() => setConfirmOpen(false)}
         onConfirm={run}
         title="Clean up old Drive statements?"
-        message={`Every "_done" file in ${folderLabel} whose own statement date is more than ${days} days old will be moved to Drive's Trash. This can't be undone from here — recovery would be through Drive's own Trash directly.`}
+        message={`Every "_done" file in the import folder whose own statement date is more than ${days} days old will be moved to Drive's Trash. This can't be undone from here — recovery would be through Drive's own Trash directly.`}
         confirmText="Move to Trash"
         danger
         busy={busy}

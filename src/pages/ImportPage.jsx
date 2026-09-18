@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
-  getDriveFolderSettings, listDriveFolders, listDriveFiles,
-  deletePendingDriveFile,
+  getDriveFolderSettings, listDriveFiles, deletePendingDriveFile,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -126,16 +125,14 @@ export default function ImportPage() {
   // A "password_required" Drive row's own password box, keyed by filename.
   // { [name]: { value, busy } }
   const [drivePwRetry, setDrivePwRetry] = useState({})
-  // Which Drive folder this run reads. '' is the Gmail folder — the one
-  // drive_settings holds and the Apps Script writes into — and stays the
-  // default. driveFolders are the extra folders someone has saved under
-  // Settings; picking one imports from there instead, without touching the
-  // Apps Script's own target. Read-only here on purpose: adding, renaming
-  // and changing folders all live on the Settings page, so there is one
-  // place that decides where statements may come from rather than two.
-  const [folderId, setFolderId] = useState('')
-  const [driveFolders, setDriveFolders] = useState([])
-  const [driveSource, setDriveSource] = useState('')
+  // Which Drive folder this run reads is a company setting, not a choice
+  // made here -- shown so it is obvious where files are coming from, but
+  // changed only under Settings. One place decides it, so a run can never
+  // read somewhere other than what Settings says.
+  // exportId is where the Apps Script saves; importId is what this reads,
+  // null when it simply follows the export folder.
+  const [exportId, setExportId] = useState('')
+  const [importId, setImportId] = useState(null)
   // The file-picker modal shown before a Drive run actually starts, so a
   // person can import just one or a few files instead of always sweeping
   // the whole pending list. pickerFiles is [{id, name}, ...]; selection and
@@ -166,19 +163,21 @@ export default function ImportPage() {
       .then((b) => setBanks(Array.isArray(b) ? b : []))
       .catch(() => {})
     getDriveFolderSettings()
-      .then((r) => setFolderId(r.folder_id || ''))
-      .catch(() => {})
-    listDriveFolders()
-      .then((f) => setDriveFolders(Array.isArray(f) ? f : []))
+      .then((r) => {
+        setExportId(r.export_folder_id || r.folder_id || '')
+        setImportId(r.import_folder_id || null)
+      })
       .catch(() => {})
   }, [])
 
-  // What the chosen source is called, for the picker heading and the
-  // progress overlay — "Drive folder" alone stops meaning anything once
-  // there is more than one of them.
-  const driveSourceLabel = driveSource
-    ? (driveFolders.find((f) => f.folder_id === driveSource)?.label || 'Drive folder')
-    : 'Gmail statements folder'
+  // Reading the export folder is the ordinary setup; a separate import
+  // folder is worth naming differently so it is obvious at a glance which
+  // one a run is about to sweep.
+  const readingExportFolder = !importId || importId === exportId
+  const effectiveImportId = importId || exportId
+  const driveSourceLabel = readingExportFolder
+    ? 'Gmail statement export folder'
+    : 'Import folder'
 
   const handleFile = useCallback(async (f) => {
     if (!f) return
@@ -338,7 +337,7 @@ export default function ImportPage() {
     setPickerLoading(true)
     setPickerSearch('')
     try {
-      const list = await listDriveFiles(driveSource)
+      const list = await listDriveFiles()
       setPickerFiles(list)
       setPickerSelected(new Set(list.map((f) => f.id)))   // select all by default
 
@@ -363,7 +362,7 @@ export default function ImportPage() {
     setDeletingUnmatched(true)
     try {
       await Promise.all(
-        unmatchedList.map((f) => deletePendingDriveFile(f.id, driveSource)))
+        unmatchedList.map((f) => deletePendingDriveFile(f.id)))
       const removedIds = new Set(unmatchedList.map((f) => f.id))
       setPickerFiles((prev) => prev.filter((f) => !removedIds.has(f.id)))
       setPickerSelected((prev) => {
@@ -425,7 +424,7 @@ export default function ImportPage() {
   const handleDeletePickerFile = async (file) => {
     setPickerDeleting((prev) => new Set(prev).add(file.id))
     try {
-      await deletePendingDriveFile(file.id, driveSource)
+      await deletePendingDriveFile(file.id)
       setPickerFiles((prev) => prev.filter((f) => f.id !== file.id))
       setPickerSelected((prev) => {
         const next = new Set(prev); next.delete(file.id); return next
@@ -453,7 +452,7 @@ export default function ImportPage() {
     try {
       const jobId = await startDriveImportJob(
         pages.trim(), batchPages.trim() === '' ? null : Number(batchPages),
-        selectedFiles, driveSource)
+        selectedFiles)
       // Reuses the same `progress` state the single-file and batch flows
       // already drive ImportProgressOverlay from -- a Drive run reports
       // itself in the exact same step shape (one step per file here, the
@@ -490,7 +489,7 @@ export default function ImportPage() {
     if (!entry?.value) return
     setDrivePwRetry((prev) => ({ ...prev, [fileName]: { ...prev[fileName], busy: true } }))
     try {
-      const res = await retryDriveFileWithPassword(fileName, entry.value, driveSource)
+      const res = await retryDriveFileWithPassword(fileName, entry.value)
       setDriveResults((prev) => ({
         ...prev,
         imported: prev.imported + 1,
@@ -690,27 +689,39 @@ export default function ImportPage() {
             </div>
 
             <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-              <label className="label">Source folder</label>
-              <select
-                value={driveSource}
-                onChange={(e) => setDriveSource(e.target.value)}
-                disabled={driveRunning}
-                className="input"
-              >
-                <option value="">
-                  Gmail statements folder{folderId ? '' : ' — not set up yet'}
-                </option>
-                {driveFolders.map((f) => (
-                  <option key={f.id} value={f.folder_id}>{f.label}</option>
-                ))}
-              </select>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-500 mb-0.5">
+                    Reading from
+                  </p>
+                  {effectiveImportId ? (
+                    <a
+                      href={`https://drive.google.com/drive/folders/${effectiveImportId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-primary-600 hover:underline break-all"
+                    >
+                      {driveSourceLabel}
+                    </a>
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      No folder set up yet
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => navigate('/settings')}
+                  className="btn-secondary shrink-0"
+                >
+                  Change in Settings
+                </button>
+              </div>
               <p className="mt-1.5 text-xs text-slate-500 flex items-start gap-1">
                 <Info className="h-3.5 w-3.5 shrink-0 mt-px text-slate-400" />
-                {driveSource
-                  ? 'A folder you added yourself. The Gmail Apps Script does '
-                    + 'not write here — it only fills the folder above.'
-                  : 'Filled automatically by the Gmail Apps Script. '
-                    + 'Add another folder, or change this one, under Settings.'}
+                {readingExportFolder
+                  ? 'The folder the Gmail Apps Script saves statements into.'
+                  : 'A folder set separately from where Gmail statements are '
+                    + 'collected — the Apps Script does not write here.'}
               </p>
             </div>
 

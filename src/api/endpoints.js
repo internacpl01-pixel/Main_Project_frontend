@@ -674,11 +674,11 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
 // status is one of "done", "failed", "password_required", "skipped".
 // selectedFiles is an array of Drive file IDs (listDriveFiles' `id` field),
 // not names -- two files can share a name, so only an id picks out one.
-// folderId picks one of the saved extra folders (listDriveFolders) instead of
-// the configured Gmail one; blank/null means the configured one, which is
-// what every call did before extra folders existed.
+// Which folder it reads is a company setting (updateDriveImportFolder), not
+// an argument -- so a run can never read somewhere other than what Settings
+// says it does.
 export async function startDriveImportJob(pages = '', batchPages = null,
-                                          selectedFiles = null, folderId = '') {
+                                          selectedFiles = null) {
   const form = new FormData()
   if (pages) form.append('pages', pages)
   if (batchPages !== null && batchPages !== '') {
@@ -687,7 +687,6 @@ export async function startDriveImportJob(pages = '', batchPages = null,
   if (selectedFiles && selectedFiles.length > 0) {
     form.append('files', selectedFiles.join(','))
   }
-  if (folderId) form.append('folder_id', folderId)
   const { data } = await api.post('/imports/from-drive', form)
   return data.job_id
 }
@@ -698,19 +697,15 @@ export async function startDriveImportJob(pages = '', batchPages = null,
 // Apps Script's pre-fix collision race), and id is what lets the picker and
 // startDriveImportJob act on one specific copy instead of "every file called
 // this".
-export async function listDriveFiles(folderId = '') {
-  const { data } = await api.get('/imports/drive-files', {
-    params: folderId ? { folder_id: folderId } : {},
-  })
+export async function listDriveFiles() {
+  const { data } = await api.get('/imports/drive-files')
   return data.files || []
 }
 
 // Trashes one not-yet-imported Drive file -- for discarding a duplicate
 // copy straight from the picker. See DELETE /imports/drive-files/{id}.
-export async function deletePendingDriveFile(fileId, folderId = '') {
-  await api.delete(`/imports/drive-files/${encodeURIComponent(fileId)}`, {
-    params: folderId ? { folder_id: folderId } : {},
-  })
+export async function deletePendingDriveFile(fileId) {
+  await api.delete(`/imports/drive-files/${encodeURIComponent(fileId)}`)
 }
 
 // The permanent history behind DriveImportLogPage -- every outcome
@@ -724,10 +719,9 @@ export async function fetchDriveImportLog(params = {}) {
 // Moves every "_done" Drive file to Drive's own Trash once its OWN
 // statement date is at least olderThanDays old -- see the docstring on
 // POST /imports/drive-cleanup for why this is Trash, not permanent delete.
-export async function cleanupDriveDoneFiles(olderThanDays, folderId = '') {
+export async function cleanupDriveDoneFiles(olderThanDays) {
   const form = new FormData()
   form.append('older_than_days', String(olderThanDays))
-  if (folderId) form.append('folder_id', folderId)
   const { data } = await api.post('/imports/drive-cleanup', form)
   return data
 }
@@ -738,57 +732,48 @@ export async function cleanupDriveDoneFiles(olderThanDays, folderId = '') {
 // carrying "_needs_password" -- that's what proves it was matched once, so
 // the backend re-derives the same bank from it rather than trusting a bank
 // passed in for a file it was never actually matched to.
-export async function retryDriveFileWithPassword(fileName, password, folderId = '') {
+export async function retryDriveFileWithPassword(fileName, password) {
   const form = new FormData()
   form.append('file_name', fileName)
   form.append('password', password)
-  if (folderId) form.append('folder_id', folderId)
   const { data } = await api.post('/imports/from-drive/retry-password', form)
   return data
 }
 
-// The Drive folder ID /imports/from-drive currently reads -- shown as the
-// starting value of the settings field on the Import page.
+// Both Drive folders, for the Settings screen:
+//   export_folder_id -- where the Gmail Apps Script SAVES attachments
+//   import_folder_id -- what imports READ; null when it simply follows the
+//                       export folder, which is the usual setup
+// Reported separately rather than resolved into one so the UI can say "same
+// as the export folder" instead of echoing that id back as though someone
+// had typed it in. folder_id is export_folder_id under its old name.
 export async function getDriveFolderSettings() {
   const { data } = await api.get('/imports/drive-settings')
   return data
 }
 
-// Changes it. The backend also pushes the new value to the Gmail Apps
-// Script's own web app so the two stay in sync -- see the docstring on
-// PUT /imports/drive-settings.
-export async function updateDriveFolderSettings(folderId) {
+// Changes the EXPORT folder. Takes a pasted Drive folder URL or a bare id.
+// The backend also pushes the new value to the Gmail Apps Script's own web
+// app so the two stay in sync -- see PUT /imports/drive-settings. This does
+// NOT change where imports read from; that is the separate setting below.
+export async function updateDriveFolderSettings(urlOrId) {
   const form = new FormData()
-  form.append('folder_id', folderId)
+  form.append('url', urlOrId)
   const { data } = await api.put('/imports/drive-settings', form)
   return data
 }
 
-// The extra Drive folders saved for this company -- somewhere other than the
-// Gmail folder to import a batch of statements from. Each is
-// {id, folder_id, label, added_by, created_at}. The Gmail folder itself is
-// NOT in this list: it comes from getDriveFolderSettings, is the one the
-// Apps Script writes into, and is always available as a source.
-export async function listDriveFolders() {
-  const { data } = await api.get('/imports/drive-folders')
-  return data.folders || []
-}
-
-// Saves another folder by its Drive URL. The backend pulls the id out of the
-// link and opens the folder to confirm it before saving, so a bad link fails
-// here rather than later during an import. Returns the saved row.
-export async function addDriveFolder(url, label = '') {
+// Sets the folder this software imports FROM. Takes a pasted Drive folder
+// URL (or a bare id); blank clears it, putting imports back to reading the
+// export folder above -- which is also what pasting the export folder's own
+// URL amounts to. Both are fine: the same folder in both fields is an
+// ordinary setup, not a mistake. Nothing here is sent to the Apps Script,
+// so this never disturbs where Gmail statements are collected.
+export async function updateDriveImportFolder(url) {
   const form = new FormData()
-  form.append('url', url)
-  if (label) form.append('label', label)
-  const { data } = await api.post('/imports/drive-folders', form)
+  form.append('url', url || '')
+  const { data } = await api.put('/imports/import-folder', form)
   return data
-}
-
-// Forgets a saved folder -- this app's bookmark only. Nothing in Drive is
-// renamed, trashed or unshared, and anything already imported stays imported.
-export async function deleteDriveFolder(rowId) {
-  await api.delete(`/imports/drive-folders/${rowId}`)
 }
 
 // What is in a workbook, before anything is imported. Returns

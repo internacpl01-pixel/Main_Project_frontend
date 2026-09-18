@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { fetchDriveImportLog, listDriveFolders } from '../api/endpoints.js'
+import { fetchDriveImportLog } from '../api/endpoints.js'
 import {
   EmptyState, Pagination, SearchInput, TableBusy, SkeletonRows,
 } from '../components/UI.jsx'
@@ -64,14 +64,6 @@ export default function DriveImportLogPage() {
   // the Settings page) owns the days figure and its own confirm step --
   // this only decides whether it is on screen.
   const [cleanupOpen, setCleanupOpen] = useState(false)
-  // Only to offer the extra saved folders as cleanup targets; the log itself
-  // is not per-folder.
-  const [folders, setFolders] = useState([])
-
-  useEffect(() => {
-    if (!canWrite) return
-    listDriveFolders().then((f) => setFolders(Array.isArray(f) ? f : [])).catch(() => {})
-  }, [canWrite])
 
   useEffect(() => {
     const t = setTimeout(() => { setQuery(search); setPage(1) }, 300)
@@ -123,7 +115,6 @@ export default function DriveImportLogPage() {
       {cleanupOpen && (
         <div className="mb-4">
           <DriveCleanupPanel
-            folders={folders}
             onCancel={() => setCleanupOpen(false)}
             onDone={() => { setCleanupOpen(false); load() }}
           />
