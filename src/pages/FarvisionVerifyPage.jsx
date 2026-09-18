@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  fetchFarvisionVerifyRows, fetchFarvisionVerifyCandidates,
+  fetchFarvisionVerifyRowsViaJob, fetchFarvisionVerifyCandidates,
   resolveFarvisionVerifyRow, exportFarvisionViaJob,
 } from '../api/endpoints.js'
-import { Spinner, EmptyState, SearchableSelect } from '../components/UI.jsx'
+import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
 
@@ -58,13 +58,21 @@ export default function FarvisionVerifyPage() {
   // repeated on every row: a row whose own "options" comes back null falls
   // back to this instead.
   const [candidates, setCandidates] = useState({ bank_names: [], account_heads: {} })
+  // The loading job's own reading (services/jobs.py) -- {percent, message} --
+  // real progress, ticked once per row actually matched (see
+  // services/farvision.py's fetch_rows on_row), not a number invented to
+  // fill the wait while the page loads.
+  const [loadProgress, setLoadProgress] = useState(null)
   // null, or which kind is currently downloading -- so each button shows its
   // own spinner instead of both greying out for one export.
   const [exporting, setExporting] = useState(null)
-  // The running job's own status line (services/jobs.py's `message`), shown
+  // The running job's own status line and percent (services/jobs.py), shown
   // beside the spinner instead of a bare "Exporting..." that says nothing for
-  // however long the job takes.
+  // however long the job takes. Real, not simulated -- ticked once per row
+  // actually matched (see _build_farvision_export's job_id/on_row), the same
+  // as the Farvision Verify listing's own loading spinner above.
   const [exportMessage, setExportMessage] = useState('')
+  const [exportPercent, setExportPercent] = useState(null)
 
   // Per-row id: 'saving' | 'saved' | an error message. Drives the small
   // status shown beside that row's dropdown once it's been touched.
@@ -76,14 +84,18 @@ export default function FarvisionVerifyPage() {
   // server.
   const [skipped, setSkipped] = useState(() => new Set())
 
-  const load = (targetPage = page) => {
+  const load = (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true)
-    fetchFarvisionVerifyRows({ ...filters, page: targetPage })
+    setLoadProgress(null)
+    fetchFarvisionVerifyRowsViaJob(
+      { ...filters, page: targetPage, page_size: targetPageSize },
+      (job) => setLoadProgress({ percent: job.percent, message: job.message }),
+    )
       .then((data) => {
         setColumns(Array.isArray(data?.columns) ? data.columns : [])
         setRows(Array.isArray(data?.rows) ? data.rows : [])
         setTotal(Number.isFinite(data?.total) ? data.total : 0)
-        setPageSize(Number.isFinite(data?.page_size) ? data.page_size : pageSize)
+        setPageSize(Number.isFinite(data?.page_size) ? data.page_size : targetPageSize)
         setPage(targetPage)
         // A row's own overrides/skips are page-local -- landing on a new
         // page starts clean rather than carrying stale state for ids that
@@ -93,12 +105,15 @@ export default function FarvisionVerifyPage() {
         setSkipped(new Set())
       })
       .catch((err) => toast.error(err.message))
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); setLoadProgress(null) })
   }
+
+  const handlePage = (p) => load(p, pageSize)
+  const handlePageSize = (n) => load(1, n)
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    load(1)
+    load(1, pageSize)
     fetchFarvisionVerifyCandidates()
       .then((data) => setCandidates({
         bank_names: Array.isArray(data?.bank_names) ? data.bank_names : [],
@@ -118,8 +133,6 @@ export default function FarvisionVerifyPage() {
     if (row.internal) return candidates.bank_names
     return candidates.account_heads[row.company] || []
   }
-
-  const totalPages = Math.max(1, Math.ceil(total / (pageSize || 1)))
 
   const handleResolve = async (row, accountHead) => {
     if (!accountHead) return
@@ -179,9 +192,11 @@ export default function FarvisionVerifyPage() {
   const handleFinalExport = async (kind, label) => {
     setExporting(kind)
     setExportMessage('Starting...')
+    setExportPercent(null)
     try {
       const { blob, filename } = await exportFarvisionViaJob(kind, filters, (job) => {
         setExportMessage(job.message || 'Working...')
+        setExportPercent(Number.isFinite(job.percent) ? job.percent : null)
       })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -197,6 +212,7 @@ export default function FarvisionVerifyPage() {
     } finally {
       setExporting(null)
       setExportMessage('')
+      setExportPercent(null)
     }
   }
 
@@ -224,7 +240,11 @@ export default function FarvisionVerifyPage() {
             className="btn-primary"
           >
             {exporting === 'receipt_payment' ? (
-              <><Spinner size="sm" tone="white" className="mr-2" /> {exportMessage || 'Exporting...'}</>
+              <>
+                <Spinner size="sm" tone="white" className="mr-2" />
+                {exportMessage || 'Exporting...'}
+                {exportPercent !== null && ` ${exportPercent}%`}
+              </>
             ) : (
               <><Download className="h-4 w-4 mr-2" /> Export Receipt Payment</>
             )}
@@ -235,7 +255,11 @@ export default function FarvisionVerifyPage() {
             className="btn-primary"
           >
             {exporting === 'deposit_withdrawal' ? (
-              <><Spinner size="sm" tone="white" className="mr-2" /> {exportMessage || 'Exporting...'}</>
+              <>
+                <Spinner size="sm" tone="white" className="mr-2" />
+                {exportMessage || 'Exporting...'}
+                {exportPercent !== null && ` ${exportPercent}%`}
+              </>
             ) : (
               <><Download className="h-4 w-4 mr-2" /> Export Deposit Withdrawal</>
             )}
@@ -245,7 +269,6 @@ export default function FarvisionVerifyPage() {
 
       {!loading && rows.length > 0 && (
         <p className="text-sm text-slate-500 mb-3">
-          {`Page ${page} of ${totalPages} — ${total} rows in total. `}
           {needsReviewOnPage === 0
             ? 'All rows on this page have an Account Head.'
             : `${needsReviewOnPage} of ${rows.length} on this page need a decision (blank or conflicting).`}
@@ -254,7 +277,26 @@ export default function FarvisionVerifyPage() {
 
       <div className="card">
         {loading ? (
-          <div className="flex justify-center py-12"><Spinner /></div>
+          <div className="flex flex-col items-center justify-center gap-3 py-12">
+            <Spinner size="lg" />
+            {/* Real, not simulated: percent comes from services/jobs.py,
+                ticked once per row actually matched against the Account Head
+                master (services/farvision.py's fetch_rows on_row) -- the
+                same "every step is real" rule ImportProgressOverlay follows,
+                just without that component's own multi-minute step list,
+                which this page's few-second load doesn't need. */}
+            <p className="text-sm font-medium text-slate-600 tabular-nums">
+              {loadProgress ? `${loadProgress.message || 'Working...'} ${loadProgress.percent}%` : 'Loading...'}
+            </p>
+            {loadProgress && (
+              <div className="h-1.5 w-56 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-primary-500 transition-all duration-300 ease-out"
+                  style={{ width: `${loadProgress.percent}%` }}
+                />
+              </div>
+            )}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
@@ -372,29 +414,15 @@ export default function FarvisionVerifyPage() {
             </table>
           </div>
         )}
-      </div>
 
-      {!loading && rows.length > 0 && (
-        <div className="flex items-center justify-between mt-4">
-          <button
-            onClick={() => load(page - 1)}
-            disabled={page <= 1}
-            className="btn-secondary"
-          >
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Previous
-          </button>
-          <span className="text-sm text-slate-500">Page {page} of {totalPages}</span>
-          <button
-            onClick={() => load(page + 1)}
-            disabled={page >= totalPages}
-            className="btn-secondary"
-          >
-            Next
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </button>
-        </div>
-      )}
+        <Pagination
+          page={page}
+          limit={pageSize}
+          total={total}
+          onPage={handlePage}
+          onLimit={handlePageSize}
+        />
+      </div>
     </div>
   )
 }

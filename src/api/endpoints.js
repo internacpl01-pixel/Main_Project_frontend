@@ -922,6 +922,20 @@ export async function fetchFarvisionVerifyRows(params = {}) {
   return data
 }
 
+// Same listing, run as a background job (services/jobs.py) so the caller can
+// show a real, row-by-row percent while it matches this page's rows against
+// the Account Head master -- see services/farvision.py's fetch_rows(on_row).
+// onProgress gets the same {percent, message, ...} shape pollImportJob
+// already reports for a PDF/Excel import; resolves with the same
+// {columns, rows, total, page, page_size} fetchFarvisionVerifyRows returns
+// directly.
+export async function fetchFarvisionVerifyRowsViaJob(params = {}, onProgress) {
+  const { data } = await api.get('/transactions/temp-trans/farvision-verify', {
+    params: { ...params, background: true },
+  })
+  return pollImportJob(data.job_id, onProgress)
+}
+
 // The full Account Head / Bank Name pools, fetched once and cached (see
 // cachedGet above) rather than once per page -- a row whose own "options"
 // came back null (services/farvision.py's fetch_rows leaves it null when it
