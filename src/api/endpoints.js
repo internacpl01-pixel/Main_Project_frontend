@@ -958,3 +958,10 @@ export async function resolveFarvisionVerifyDescription(id, description) {
   })
   return data
 }
+
+export async function resolveFarvisionVerifyTdsRate(id, tdsRate) {
+  const { data } = await api.post('/transactions/temp-trans/farvision-verify/resolve-tds-rate', {
+    id, tds_rate: tdsRate,
+  })
+  return data
+}

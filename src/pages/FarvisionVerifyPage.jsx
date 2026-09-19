@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   fetchFarvisionVerifyRowsViaJob, fetchFarvisionVerifyCandidates,
-  resolveFarvisionVerifyRow, resolveFarvisionVerifyDescription, exportFarvisionViaJob,
+  resolveFarvisionVerifyRow, resolveFarvisionVerifyDescription,
+  resolveFarvisionVerifyTdsRate, exportFarvisionViaJob,
 } from '../api/endpoints.js'
 import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
@@ -10,6 +11,12 @@ import toast from 'react-hot-toast'
 import { Download, ArrowLeft, CheckCircle2, Check, Info } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
+// A Farvision Verify-only column, not one of farvision.py's COLUMNS -- never
+// exported, confirmed with the user. Injected into the rendered header/row
+// right after Description (see displayColumns below) since it isn't part of
+// the server's own column list.
+const TDS_RATE_COLUMN = 'TDS Rate'
+const TDS_RATE_PRESETS = ['1%', '2%', '10%']
 
 // Dates arrive ISO, numbers as numbers, everything else as the bank wrote
 // it. Only null/undefined become a dash -- 0 is a value the row actually has.
@@ -80,6 +87,8 @@ export default function FarvisionVerifyPage() {
   // Same shape as rowState, but for the Description override -- kept
   // separate so saving one doesn't show a stray status next to the other.
   const [descState, setDescState] = useState({})
+  // Same shape again, for the TDS Rate field.
+  const [tdsRateState, setTdsRateState] = useState({})
   // Ids currently showing their override dropdown -- only ever matched rows;
   // an unmatched row's dropdown is always shown, so it never needs this.
   const [overriding, setOverriding] = useState(() => new Set())
@@ -117,6 +126,7 @@ export default function FarvisionVerifyPage() {
         setSkipped(new Set())
         setDescState({})
         setEditingDescription(new Set())
+        setTdsRateState({})
       })
       .catch((err) => toast.error(err.message))
       .finally(() => { setLoading(false); setLoadProgress(null) })
@@ -143,6 +153,13 @@ export default function FarvisionVerifyPage() {
   // above is what a dropdown falls back to then, keyed by whether this is an
   // Internal-transfer row (Bank Names) or a normal one (this row's own
   // company's Account Heads).
+  // TDS Rate is display-only (see TDS_RATE_COLUMN above) -- not one of the
+  // server's own `columns` (farvision.py's real export COLUMNS), so it's
+  // injected here purely for rendering, right after Description.
+  const displayColumns = columns.flatMap((col) => (
+    col === 'Description' ? [col, TDS_RATE_COLUMN] : [col]
+  ))
+
   const optionsFor = (row) => {
     if (Array.isArray(row.options)) return row.options
     if (row.internal) return candidates.bank_names
@@ -221,6 +238,32 @@ export default function FarvisionVerifyPage() {
       setDescState((prev) => ({ ...prev, [row.id]: 'saved' }))
     } catch (err) {
       setDescState((prev) => ({ ...prev, [row.id]: err.message || 'Could not save' }))
+    }
+  }
+
+  const handleResolveTdsRate = async (row, rawValue) => {
+    const value = rawValue.trim()
+    if (value === (row.tds_rate || '')) return
+    setTdsRateState((prev) => ({ ...prev, [row.id]: 'saving' }))
+    try {
+      // The server reverse-calculates Debit Amount/Adjustment Amount from
+      // the rate (gross-up net -> gross, Credit Amount untouched) and
+      // returns the real recomputed values -- read back here the same way
+      // the Account Head resolve's Parent Account Head is, rather than
+      // guessing the formula again client-side.
+      const result = await resolveFarvisionVerifyTdsRate(row.id, value)
+      setRows((prev) => prev.map((r) =>
+        r.id === row.id
+          ? {
+              ...r,
+              tds_rate: value,
+              'Debit Amount': result.debit_amount,
+              'Adjustment Amount': result.adjustment_amount,
+            }
+          : r))
+      setTdsRateState((prev) => ({ ...prev, [row.id]: 'saved' }))
+    } catch (err) {
+      setTdsRateState((prev) => ({ ...prev, [row.id]: err.message || 'Could not save' }))
     }
   }
 
@@ -384,10 +427,13 @@ export default function FarvisionVerifyPage() {
           />
         ) : (
           <div className="overflow-x-auto">
+            <datalist id="tds-rate-presets">
+              {TDS_RATE_PRESETS.map((p) => <option key={p} value={p} />)}
+            </datalist>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase">
-                  {columns.map((col) => (
+                  {displayColumns.map((col) => (
                     <th
                       key={col}
                       className={`px-4 py-3 whitespace-nowrap ${col === ACCOUNT_HEAD_COLUMN ? 'min-w-[22rem]' : ''}`}
@@ -406,7 +452,37 @@ export default function FarvisionVerifyPage() {
 
                   return (
                     <tr key={row.id} className={!row.matched && !isSkipped ? 'bg-amber-50' : ''}>
-                      {columns.map((col) => {
+                      {displayColumns.map((col) => {
+                        if (col === TDS_RATE_COLUMN) {
+                          const tState = tdsRateState[row.id]
+                          return (
+                            <td key={col} className="px-4 py-3 align-top text-slate-700">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  key={`${row.id}-${row.tds_rate || ''}`}
+                                  type="text"
+                                  list="tds-rate-presets"
+                                  defaultValue={row.tds_rate || ''}
+                                  placeholder="—"
+                                  disabled={tState === 'saving'}
+                                  onBlur={(e) => handleResolveTdsRate(row, e.target.value)}
+                                  className="input py-1 text-xs w-20"
+                                />
+                                {tState === 'saving' && <Spinner size="sm" />}
+                                {tState === 'saved' && (
+                                  <span className="inline-flex shrink-0 items-center text-green-700">
+                                    <Check className="h-3.5 w-3.5" />
+                                  </span>
+                                )}
+                                {typeof tState === 'string' && tState !== 'saving' && tState !== 'saved' && (
+                                  <span className="shrink-0 text-xs font-medium text-red-700" title={tState}>
+                                    not saved
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          )
+                        }
                         if (col === 'Narration') {
                           const descOpen = showDesc.has(row.id)
                           return (
