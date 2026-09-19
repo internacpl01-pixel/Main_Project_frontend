@@ -7,7 +7,7 @@ import {
 import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2, Check } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check, Info } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
 
@@ -83,6 +83,10 @@ export default function FarvisionVerifyPage() {
   // Ids marked "skip for now" -- client-only, undoable, never sent to the
   // server.
   const [skipped, setSkipped] = useState(() => new Set())
+  // Ids currently showing the raw bank Description under Narration -- purely
+  // a client-side convenience toggle for picking an Account Head, never part
+  // of what gets exported (confirmed with the user).
+  const [showDesc, setShowDesc] = useState(() => new Set())
 
   const load = (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true)
@@ -172,6 +176,15 @@ export default function FarvisionVerifyPage() {
     setSkipped((prev) => {
       const next = new Set(prev)
       next.delete(id)
+      return next
+    })
+  }
+
+  const toggleDesc = (id) => {
+    setShowDesc((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
@@ -338,6 +351,29 @@ export default function FarvisionVerifyPage() {
                   return (
                     <tr key={row.id} className={!row.matched && !isSkipped ? 'bg-amber-50' : ''}>
                       {columns.map((col) => {
+                        if (col === 'Narration') {
+                          const descOpen = showDesc.has(row.id)
+                          return (
+                            <td key={col} className="px-4 py-3 align-top text-slate-700 max-w-xs">
+                              <div className="flex items-start gap-1">
+                                <div className="break-words">{showValue(row[col])}</div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDesc(row.id)}
+                                  title="Show this row's raw bank Description"
+                                  className="shrink-0 text-slate-400 hover:text-primary-600"
+                                >
+                                  <Info className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              {descOpen && (
+                                <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 break-words">
+                                  {showValue(row.desc)}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        }
                         if (col !== ACCOUNT_HEAD_COLUMN) {
                           return (
                             <td key={col} className="px-4 py-3 align-top text-slate-700 max-w-xs">
