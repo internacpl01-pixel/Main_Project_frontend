@@ -104,12 +104,28 @@ export default function FarvisionVerifyPage() {
   // PAYABLE (NIL)"), confirmed with the user, not just rows that came back
   // blank.
   const [editingDescription, setEditingDescription] = useState(() => new Set())
+  // This page's own filters -- Date range, Debit/Credit, Document Type --
+  // on top of whatever filters were inherited from the Imported Rows page's
+  // own navigation state, confirmed with the user. document_type is cheap
+  // (a raw-column SQL check, no Account Head matching -- see
+  // routers.transactions._farvision_where) same as the other two, so all
+  // three narrow the query itself rather than filtering already-loaded rows.
+  const [verifyFilters, setVerifyFilters] = useState({
+    date_from: filters.date_from || '',
+    date_to: filters.date_to || '',
+    debit_credit: '',
+    document_type: '',
+  })
 
-  const load = (targetPage = page, targetPageSize = pageSize) => {
+  // Strips blank values so an unset filter never overrides a nav-state one
+  // with an empty string.
+  const activeFilterParams = (f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v))
+
+  const load = (targetPage = page, targetPageSize = pageSize, targetFilters = verifyFilters) => {
     setLoading(true)
     setLoadProgress(null)
     fetchFarvisionVerifyRowsViaJob(
-      { ...filters, page: targetPage, page_size: targetPageSize },
+      { ...filters, ...activeFilterParams(targetFilters), page: targetPage, page_size: targetPageSize },
       (job) => setLoadProgress({ percent: job.percent, message: job.message }),
     )
       .then((data) => {
@@ -134,6 +150,12 @@ export default function FarvisionVerifyPage() {
 
   const handlePage = (p) => load(p, pageSize)
   const handlePageSize = (n) => load(1, n)
+
+  const handleFilterChange = (key, value) => {
+    const next = { ...verifyFilters, [key]: value }
+    setVerifyFilters(next)
+    load(1, pageSize, next)
+  }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -316,10 +338,19 @@ export default function FarvisionVerifyPage() {
     setExportMessage('Starting...')
     setExportPercent(null)
     try {
-      const { blob, filename } = await exportFarvisionViaJob(kind, filters, (job) => {
-        setExportMessage(job.message || 'Working...')
-        setExportPercent(Number.isFinite(job.percent) ? job.percent : null)
-      })
+      // Date and Debit/Credit carry over so the export never disagrees with
+      // what this page is showing -- Document Type does not, since kind
+      // ('receipt_payment' / 'deposit_withdrawal') already picks exactly one
+      // document type's own file.
+      const { document_type: _documentType, ...exportOnlyFilters } = verifyFilters
+      const { blob, filename } = await exportFarvisionViaJob(
+        kind,
+        { ...filters, ...activeFilterParams(exportOnlyFilters) },
+        (job) => {
+          setExportMessage(job.message || 'Working...')
+          setExportPercent(Number.isFinite(job.percent) ? job.percent : null)
+        },
+      )
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -387,6 +418,65 @@ export default function FarvisionVerifyPage() {
             )}
           </button>
         </div>
+      </div>
+
+      <div className="card mb-4 flex flex-wrap items-end gap-4 p-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Date from</label>
+          <input
+            type="date"
+            className="input py-1 text-xs"
+            value={verifyFilters.date_from}
+            onChange={(e) => handleFilterChange('date_from', e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Date to</label>
+          <input
+            type="date"
+            className="input py-1 text-xs"
+            value={verifyFilters.date_to}
+            onChange={(e) => handleFilterChange('date_to', e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Debit / Credit</label>
+          <select
+            className="input py-1 text-xs"
+            value={verifyFilters.debit_credit}
+            onChange={(e) => handleFilterChange('debit_credit', e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="Debit">Debit</option>
+            <option value="Credit">Credit</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Document Type</label>
+          <select
+            className="input py-1 text-xs"
+            value={verifyFilters.document_type}
+            onChange={(e) => handleFilterChange('document_type', e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="Payment/Reciept">Payment/Reciept</option>
+            <option value="Deposit/withdrawal">Deposit/withdrawal</option>
+          </select>
+        </div>
+        {(verifyFilters.date_from || verifyFilters.date_to
+          || verifyFilters.debit_credit || verifyFilters.document_type) && (
+          <button
+            type="button"
+            onClick={() => {
+              const cleared = { date_from: '', date_to: '', debit_credit: '', document_type: '' }
+              setVerifyFilters(cleared)
+              load(1, pageSize, cleared)
+            }}
+            className="text-xs text-slate-400 hover:text-slate-600 hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {!loading && rows.length > 0 && (
