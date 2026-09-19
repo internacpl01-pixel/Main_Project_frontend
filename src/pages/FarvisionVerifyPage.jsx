@@ -3,12 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   fetchFarvisionVerifyRowsViaJob, fetchFarvisionVerifyCandidates,
   resolveFarvisionVerifyRow, resolveFarvisionVerifyDescription,
-  resolveFarvisionVerifyTdsRate, resetFarvisionExportStatus, exportFarvisionViaJob,
+  resolveFarvisionVerifyTdsRate, exportFarvisionViaJob,
 } from '../api/endpoints.js'
 import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2, Check, Info, RotateCcw } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check, Info } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
 // A Farvision Verify-only column, not one of farvision.py's COLUMNS -- never
@@ -73,7 +73,6 @@ export default function FarvisionVerifyPage() {
   // null, or which kind is currently downloading -- so each button shows its
   // own spinner instead of both greying out for one export.
   const [exporting, setExporting] = useState(null)
-  const [resettingExportStatus, setResettingExportStatus] = useState(false)
   // The running job's own status line and percent (services/jobs.py), shown
   // beside the spinner instead of a bare "Exporting..." that says nothing for
   // however long the job takes. Real, not simulated -- ticked once per row
@@ -370,24 +369,6 @@ export default function FarvisionVerifyPage() {
     }
   }
 
-  // Turns Export Status back off for whatever this page's filters currently
-  // cover, so an already-exported batch can be exported again on purpose --
-  // confirmed with the user. Scoped the same way handleFinalExport is: Date
-  // and Debit/Credit carry over, Document Type included too since the reset
-  // (unlike an export) isn't tied to one of the two files.
-  const handleResetExportStatus = async () => {
-    setResettingExportStatus(true)
-    try {
-      const { reset } = await resetFarvisionExportStatus({ ...filters, ...activeFilterParams(verifyFilters) })
-      toast.success(reset > 0 ? `Export Status cleared on ${reset} row(s)` : 'No rows had Export Status set')
-      load(page, pageSize)
-    } catch (err) {
-      toast.error(err.message || 'Could not reset Export Status')
-    } finally {
-      setResettingExportStatus(false)
-    }
-  }
-
   // Page-local -- this page no longer loads every row up front, so this can
   // only speak for what's on screen, not the whole filtered batch. "total"
   // (from the server, a plain count -- no matching needed) covers the batch.
@@ -435,19 +416,6 @@ export default function FarvisionVerifyPage() {
             ) : (
               <><Download className="h-4 w-4 mr-2" /> Export Deposit Withdrawal</>
             )}
-          </button>
-          <button
-            onClick={handleResetExportStatus}
-            disabled={resettingExportStatus}
-            title="Turn Export Status back off for the rows currently shown, so this batch can be exported again"
-            className="btn-secondary"
-          >
-            {resettingExportStatus ? (
-              <Spinner size="sm" className="mr-2" />
-            ) : (
-              <RotateCcw className="h-4 w-4 mr-2" />
-            )}
-            Reset Export Status
           </button>
         </div>
       </div>

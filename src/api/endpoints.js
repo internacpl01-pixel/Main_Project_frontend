@@ -984,11 +984,26 @@ export async function resolveFarvisionVerifyTdsRate(id, tdsRate) {
   return data
 }
 
-// Scoped to whatever filters the Verify page currently has active -- same
-// params the listing/export endpoints take -- not a blanket reset of every
-// row this company has ever exported.
-export async function resetFarvisionExportStatus(params = {}) {
-  const { data } = await api.post('/transactions/temp-trans/farvision-verify/reset-export-status', null, {
+// Lives on Imported Rows, not the Verify page -- confirmed with the user.
+// Turns "Yes" back to "No" for every row the Imported Rows table's current
+// filters cover (the same params listParams() builds there), not a blanket
+// reset of every row this company has ever exported.
+export async function resetExportStatus(params = {}) {
+  const { data } = await api.post('/transactions/temp-trans/reset-export-status', null, {
+    params,
+  })
+  return data
+}
+
+// Marks every currently-"No" row the Imported Rows table's filters cover as
+// "Yes" right away, and hands back their ids -- confirmed with the user:
+// clicking Export Farvision IS the export decision, not a preview of one.
+// Those ids get carried into the Farvision Verify page as include_ids, the
+// one thing that still lets an already-"Yes" row show up and be downloaded
+// there (see backend's _exclude_exported) -- without it, the very rows this
+// call just marked would vanish from the page it's about to open.
+export async function prepareFarvisionExport(params = {}) {
+  const { data } = await api.post('/transactions/temp-trans/prepare-farvision-export', null, {
     params,
   })
   return data

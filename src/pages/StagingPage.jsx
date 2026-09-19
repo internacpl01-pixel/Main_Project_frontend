@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
-  setAllTempRowsLock,
+  setAllTempRowsLock, resetExportStatus, prepareFarvisionExport,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import {
   Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter, Lock, Unlock,
-  ShieldCheck, FileSpreadsheet,
+  ShieldCheck, FileSpreadsheet, RotateCcw,
 } from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
@@ -151,6 +151,13 @@ export default function StagingPage() {
   const [bulkLock, setBulkLock] = useState(null)
   const [bulkLockBusy, setBulkLockBusy] = useState(false)
 
+  // Turns "Yes" back to "No" for every row the filters currently cover, so a
+  // batch already exported can be exported again on purpose -- moved here
+  // from the Farvision Verify page per the user, since Export Status is a
+  // temp_trans field and this is the page that owns temp_trans rows.
+  const [resettingExportStatus, setResettingExportStatus] = useState(false)
+  const [preparingExport, setPreparingExport] = useState(false)
+
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
   useEffect(() => {
@@ -223,8 +230,39 @@ export default function StagingPage() {
   // still behaves the way it looks like it should. The download itself now
   // happens from that page's own "Final Export Farvision" button, once any
   // ambiguous Account Heads have been reviewed.
-  const handleExportFarvision = () => {
-    navigate('/farvision-verify', { state: { filters: listParams() } })
+  // Marks every currently-"No" row these filters cover as "Yes" right away
+  // -- confirmed with the user, this click IS the export decision, not a
+  // preview of one -- then carries their ids into the Verify page as
+  // include_ids so they still show and can still be downloaded on THIS
+  // visit despite already reading "Yes" (see backend's _exclude_exported).
+  // A later, ordinary visit to Verify (e.g. a bookmark) won't have
+  // include_ids and so won't show them -- the whole point of marking them
+  // here.
+  const handleExportFarvision = async () => {
+    setPreparingExport(true)
+    try {
+      const { ids } = await prepareFarvisionExport(listParams())
+      navigate('/farvision-verify', {
+        state: { filters: { ...listParams(), include_ids: (ids || []).join(',') } },
+      })
+    } catch (err) {
+      toast.error(err.message || 'Could not prepare the Farvision export')
+    } finally {
+      setPreparingExport(false)
+    }
+  }
+
+  const handleResetExportStatus = async () => {
+    setResettingExportStatus(true)
+    try {
+      const { reset } = await resetExportStatus(listParams())
+      toast.success(reset > 0 ? `Export Status cleared on ${reset} row(s)` : 'No rows had Export Status set')
+      load()
+    } catch (err) {
+      toast.error(err.message || 'Could not reset Export Status')
+    } finally {
+      setResettingExportStatus(false)
+    }
   }
 
   const load = useCallback(async () => {
@@ -597,12 +635,29 @@ export default function StagingPage() {
               Check Rules
             </button>
             <button
-              onClick={handleExportFarvision}
-              disabled={!summary?.staged_total}
-              title="Review any ambiguous Account Heads, then export in Farvision's column format"
+              onClick={handleResetExportStatus}
+              disabled={resettingExportStatus || !summary?.staged_total}
+              title="Turn Export Status back off for the rows currently shown, so they can be exported again"
               className="btn-secondary btn-sm"
             >
-              <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+              {resettingExportStatus ? (
+                <Spinner size="sm" className="mr-1.5" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Reset Export Status
+            </button>
+            <button
+              onClick={handleExportFarvision}
+              disabled={preparingExport || !summary?.staged_total}
+              title="Marks these rows exported, then opens Farvision Verify to review Account Heads and download"
+              className="btn-secondary btn-sm"
+            >
+              {preparingExport ? (
+                <Spinner size="sm" className="mr-1.5" />
+              ) : (
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+              )}
               Export Farvision
             </button>
             {canWrite && (
