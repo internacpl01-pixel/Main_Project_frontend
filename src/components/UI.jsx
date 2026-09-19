@@ -476,8 +476,14 @@ export function SearchInput({ value, onChange, placeholder, onClear, list }) {
 // onChange, so the result can never be a value that wasn't actually offered.
 // Rendered matches are capped so an empty filter over a huge list doesn't
 // put thousands of DOM nodes on the page at once.
+// searchPool, when given, is what typing actually searches -- options alone
+// is still what shows before a query is typed. Lets a caller show a short,
+// smart-suggested list by default while still letting a manual search reach
+// every real option, for the case those suggestions guessed wrong (a
+// Farvision Verify row's own candidate list, say, versus the whole Account
+// Head master).
 export function SearchableSelect({
-  options, value, onChange, placeholder = 'Search...', disabled = false, className = '',
+  options, searchPool, value, onChange, placeholder = 'Search...', disabled = false, className = '',
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -496,7 +502,7 @@ export function SearchableSelect({
   }, [open])
 
   const filtered = (query
-    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    ? (searchPool || options).filter((o) => o.toLowerCase().includes(query.toLowerCase()))
     : options
   ).slice(0, 200)
 

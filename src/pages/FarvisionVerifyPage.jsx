@@ -134,6 +134,16 @@ export default function FarvisionVerifyPage() {
     return candidates.account_heads[row.company] || []
   }
 
+  // The full pool a row could ever match against -- always the whole
+  // company's Account Head master (or every Bank Name for an Internal
+  // row), regardless of how short row.options is. Passed as
+  // SearchableSelect's searchPool so a manual search always reaches every
+  // real entry even when the row's own suggested list guessed wrong or
+  // only offered a few candidates -- confirmed with the user as the actual
+  // problem: the suggestions are fine, but typing was stuck searching only
+  // that short list instead of the master itself.
+  const fullPoolFor = (row) => (row.internal ? candidates.bank_names : candidates.account_heads[row.company] || [])
+
   const handleResolve = async (row, accountHead) => {
     if (!accountHead) return
     setRowState((prev) => ({ ...prev, [row.id]: 'saving' }))
@@ -351,6 +361,7 @@ export default function FarvisionVerifyPage() {
                               <div className="flex items-center gap-2">
                                 <SearchableSelect
                                   options={optionsFor(row)}
+                                  searchPool={fullPoolFor(row)}
                                   value=""
                                   onChange={(opt) => handleResolve(row, opt)}
                                   disabled={state === 'saving'}
