@@ -17,10 +17,6 @@ const ACCOUNT_HEAD_COLUMN = 'Account Head'
 // the server's own column list.
 const TDS_RATE_COLUMN = 'TDS Rate'
 const TDS_RATE_PRESETS = ['1%', '2%', '10%']
-// Same as TDS_RATE_COLUMN -- injected for display only, appended at the end
-// of the row instead of in the middle since it's a standing status rather
-// than something tied to a particular export field.
-const EXPORT_STATUS_COLUMN = 'Export Status'
 
 // Dates arrive ISO, numbers as numbers, everything else as the bank wrote
 // it. Only null/undefined become a dash -- 0 is a value the row actually has.
@@ -183,10 +179,9 @@ export default function FarvisionVerifyPage() {
   // TDS Rate is display-only (see TDS_RATE_COLUMN above) -- not one of the
   // server's own `columns` (farvision.py's real export COLUMNS), so it's
   // injected here purely for rendering, right after Description.
-  const displayColumns = [
-    ...columns.flatMap((col) => (col === 'Description' ? [col, TDS_RATE_COLUMN] : [col])),
-    EXPORT_STATUS_COLUMN,
-  ]
+  const displayColumns = columns.flatMap((col) => (
+    col === 'Description' ? [col, TDS_RATE_COLUMN] : [col]
+  ))
 
   const optionsFor = (row) => {
     if (Array.isArray(row.options)) return row.options
@@ -580,20 +575,6 @@ export default function FarvisionVerifyPage() {
                   return (
                     <tr key={row.id} className={!row.matched && !isSkipped ? 'bg-amber-50' : ''}>
                       {displayColumns.map((col) => {
-                        if (col === EXPORT_STATUS_COLUMN) {
-                          const exported = !!row.export_status
-                          return (
-                            <td key={col} className="px-4 py-3 align-top">
-                              <span
-                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                                  exported ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-                                }`}
-                              >
-                                {exported ? 'Exported' : 'Not exported'}
-                              </span>
-                            </td>
-                          )
-                        }
                         if (col === TDS_RATE_COLUMN) {
                           const tState = tdsRateState[row.id]
                           return (
