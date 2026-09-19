@@ -241,9 +241,18 @@ export default function StagingPage() {
   const handleExportFarvision = async () => {
     setPreparingExport(true)
     try {
-      const { ids } = await prepareFarvisionExport(listParams())
+      const { ids, already_exported: alreadyExported } = await prepareFarvisionExport(listParams())
+      if (!ids?.length) {
+        // Nothing NEW to send to Verify -- distinguish why, rather than
+        // navigating to a page that would just say "Nothing to export" and
+        // read like something had gone wrong.
+        toast.error(alreadyExported > 0
+          ? `Every matching transaction (${alreadyExported}) is already exported. Use Reset Export Status to export ${alreadyExported === 1 ? 'it' : 'them'} again.`
+          : 'No transactions match these filters to export.')
+        return
+      }
       navigate('/farvision-verify', {
-        state: { filters: { ...listParams(), include_ids: (ids || []).join(',') } },
+        state: { filters: { ...listParams(), include_ids: ids.join(',') } },
       })
     } catch (err) {
       toast.error(err.message || 'Could not prepare the Farvision export')
