@@ -501,24 +501,37 @@ export function SearchableSelect({
     return () => document.removeEventListener('mousedown', away)
   }, [open])
 
+  // Ranking is strict prefix-first: an exact match beats a whole-string
+  // prefix match beats a match that only starts on some later word (e.g.
+  // "...CINEMATOGRAPHIC FILMS" for query "f") beats a plain substring match
+  // beats the same-first-letter catch-all. Tiers never mix, so a real
+  // prefix hit can never be pushed down by an unrelated word-start hit that
+  // happens to sort earlier alphabetically.
   const q = query.trim().toLowerCase()
   const combined = !q
     ? options
     : (() => {
-        const starts = []
+        const exact = []
+        const startsWith = []
+        const wordStart = []
         const contains = []
         const sameLetter = []
+        const seen = new Set()
         for (const o of (searchPool || options)) {
+          if (seen.has(o)) continue
           const lower = o.toLowerCase()
-          if (lower.startsWith(q) || lower.split(/[^a-z0-9]+/).some((w) => w.startsWith(q))) {
-            starts.push(o)
-          } else if (lower.includes(q)) {
-            contains.push(o)
-          } else if (lower.startsWith(q[0])) {
-            sameLetter.push(o)
+          let bucket = null
+          if (lower === q) bucket = exact
+          else if (lower.startsWith(q)) bucket = startsWith
+          else if (lower.split(/[^a-z0-9]+/).some((w) => w.startsWith(q))) bucket = wordStart
+          else if (lower.includes(q)) bucket = contains
+          else if (lower.startsWith(q[0])) bucket = sameLetter
+          if (bucket) {
+            bucket.push(o)
+            seen.add(o)
           }
         }
-        return [...starts, ...contains, ...sameLetter]
+        return [...exact, ...startsWith, ...wordStart, ...contains, ...sameLetter]
       })()
   const filtered = combined.slice(0, 200)
 
