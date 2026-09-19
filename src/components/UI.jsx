@@ -501,10 +501,26 @@ export function SearchableSelect({
     return () => document.removeEventListener('mousedown', away)
   }, [open])
 
-  const filtered = (query
-    ? (searchPool || options).filter((o) => o.toLowerCase().includes(query.toLowerCase()))
-    : options
-  ).slice(0, 200)
+  const q = query.trim().toLowerCase()
+  const combined = !q
+    ? options
+    : (() => {
+        const starts = []
+        const contains = []
+        const sameLetter = []
+        for (const o of (searchPool || options)) {
+          const lower = o.toLowerCase()
+          if (lower.startsWith(q) || lower.split(/[^a-z0-9]+/).some((w) => w.startsWith(q))) {
+            starts.push(o)
+          } else if (lower.includes(q)) {
+            contains.push(o)
+          } else if (lower.startsWith(q[0])) {
+            sameLetter.push(o)
+          }
+        }
+        return [...starts, ...contains, ...sameLetter]
+      })()
+  const filtered = combined.slice(0, 200)
 
   return (
     <div className={`relative ${className}`} ref={ref}>
@@ -534,7 +550,7 @@ export function SearchableSelect({
               </button>
             ))
           )}
-          {options.length > filtered.length && filtered.length === 200 && (
+          {combined.length > filtered.length && (
             <p className="border-t border-slate-100 px-3 py-1.5 text-[10px] text-slate-400">
               Showing first 200 matches — keep typing to narrow further.
             </p>
