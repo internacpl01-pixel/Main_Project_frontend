@@ -163,11 +163,22 @@ export default function FarvisionVerifyPage() {
     if (!accountHead) return
     setRowState((prev) => ({ ...prev, [row.id]: 'saving' }))
     try {
-      await resolveFarvisionVerifyRow(row.id, accountHead)
-      // Written for good on the server -- reflected here too, so the row
-      // now reads as a plain matched row instead of staying in review mode.
+      // The server already looks up Parent Account Head from master data for
+      // whichever Account Head was just picked (see the resolve endpoint) --
+      // read it back from the response rather than leaving this row's old
+      // Parent Account Head on screen until the next reload, confirmed with
+      // the user as the actual bug: the lookup was already happening, only
+      // the table wasn't being told about it.
+      const result = await resolveFarvisionVerifyRow(row.id, accountHead)
       setRows((prev) => prev.map((r) =>
-        r.id === row.id ? { ...r, [ACCOUNT_HEAD_COLUMN]: accountHead, matched: true } : r))
+        r.id === row.id
+          ? {
+              ...r,
+              [ACCOUNT_HEAD_COLUMN]: accountHead,
+              'Parent Account Head': result.parent_account_head,
+              matched: true,
+            }
+          : r))
       setOverriding((prev) => {
         const next = new Set(prev)
         next.delete(row.id)
