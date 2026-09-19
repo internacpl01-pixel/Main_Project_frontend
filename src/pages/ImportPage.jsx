@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
-  getDriveFolderSettings, listDriveFiles, skipDriveFile,
+  getDriveFolderSettings, listDriveFiles, skipDriveFile, fetchDriveLinkFile,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -151,6 +151,12 @@ export default function ImportPage() {
   const [unmatchedOpen, setUnmatchedOpen] = useState(false)
   const [unmatchedList, setUnmatchedList] = useState([])
   const [skippingUnmatched, setSkippingUnmatched] = useState(false)
+  // A single file's Drive link, pasted instead of picking from disk -- goes
+  // through fetchDriveLinkFile then straight into handleFileSelection, so
+  // everything downstream (multi-sheet inspect, bank/password prompts) is
+  // the exact same code path as a computer-picked file.
+  const [driveLinkUrl, setDriveLinkUrl] = useState('')
+  const [driveLinkLoading, setDriveLinkLoading] = useState(false)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -243,6 +249,20 @@ export default function ImportPage() {
     setFile(null); setResult(null)
     setBatchFiles(valid)
     setBatchResults([])
+  }
+
+  const handleDriveLinkImport = async () => {
+    if (!driveLinkUrl.trim()) return
+    setDriveLinkLoading(true)
+    try {
+      const f = await fetchDriveLinkFile(driveLinkUrl.trim())
+      setDriveLinkUrl('')
+      handleFileSelection([f])
+    } catch (err) {
+      toast.error(err.message || 'Could not fetch that Drive file')
+    } finally {
+      setDriveLinkLoading(false)
+    }
   }
 
   const handleImportBatch = async () => {
@@ -666,6 +686,32 @@ export default function ImportPage() {
               ref={fileInput} type="file" accept=".pdf,.csv,.xls,.xlsx" multiple
               onChange={(e) => handleFileSelection(e.target.files)} className="hidden"
             />
+          </div>
+        </div>
+      )}
+
+      {source === 'computer' && !file && !result && batchFiles.length === 0 && batchResults.length === 0 && (
+        <div className="card">
+          <div className="card-body flex items-center gap-3">
+            <input
+              type="text"
+              value={driveLinkUrl}
+              onChange={(e) => setDriveLinkUrl(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleDriveLinkImport() }}
+              placeholder="Or paste a Google Drive link to the statement (or a Google Sheet)"
+              className="input flex-1"
+              disabled={driveLinkLoading}
+            />
+            <button
+              onClick={handleDriveLinkImport}
+              disabled={driveLinkLoading || !driveLinkUrl.trim()}
+              className="btn-secondary shrink-0"
+            >
+              {driveLinkLoading
+                ? <Spinner size="sm" />
+                : <><HardDrive className="h-4 w-4 mr-1.5" />Fetch from Drive</>}
+            </button>
           </div>
         </div>
       )}

@@ -797,6 +797,24 @@ export async function updateDriveImportFolder(url) {
   return data
 }
 
+// Pulls a single pasted Drive file (an .xlsx/.xls/.csv/.pdf, or a native
+// Google Sheet, which the backend exports to .xlsx) down as base64 bytes and
+// hands back a ready-to-use File object -- the caller then feeds it into the
+// exact same handleFileSelection() a computer-picked file already goes
+// through, so multi-sheet workbooks, the sheet picker, bank/password prompts
+// etc. all work unchanged.
+export async function fetchDriveLinkFile(url) {
+  const form = new FormData()
+  form.append('url', url)
+  const { data } = await api.post('/imports/drive-link/fetch', form, {
+    timeout: IMPORT_TIMEOUT_MS,
+  })
+  const binary = atob(data.content_b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new File([bytes], data.filename)
+}
+
 // What is in a workbook, before anything is imported. Returns
 // { sheets: [{ name, rows, data_rows, header_row, headers_detected,
 //              unmapped_headers, is_statement, reason, sample,
