@@ -951,3 +951,10 @@ export async function resolveFarvisionVerifyRow(id, accountHead) {
   })
   return data
 }
+
+export async function resolveFarvisionVerifyDescription(id, description) {
+  const { data } = await api.post('/transactions/temp-trans/farvision-verify/resolve-description', {
+    id, description,
+  })
+  return data
+}

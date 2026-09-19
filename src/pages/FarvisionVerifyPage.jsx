@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   fetchFarvisionVerifyRowsViaJob, fetchFarvisionVerifyCandidates,
-  resolveFarvisionVerifyRow, exportFarvisionViaJob,
+  resolveFarvisionVerifyRow, resolveFarvisionVerifyDescription, exportFarvisionViaJob,
 } from '../api/endpoints.js'
 import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
@@ -57,7 +57,7 @@ export default function FarvisionVerifyPage() {
   // pages and re-visits -- see fetchFarvisionVerifyCandidates) rather than
   // repeated on every row: a row whose own "options" comes back null falls
   // back to this instead.
-  const [candidates, setCandidates] = useState({ bank_names: [], account_heads: {} })
+  const [candidates, setCandidates] = useState({ bank_names: [], account_heads: {}, descriptions: [] })
   // The loading job's own reading (services/jobs.py) -- {percent, message} --
   // real progress, ticked once per row actually matched (see
   // services/farvision.py's fetch_rows on_row), not a number invented to
@@ -77,6 +77,9 @@ export default function FarvisionVerifyPage() {
   // Per-row id: 'saving' | 'saved' | an error message. Drives the small
   // status shown beside that row's dropdown once it's been touched.
   const [rowState, setRowState] = useState({})
+  // Same shape as rowState, but for the Description override -- kept
+  // separate so saving one doesn't show a stray status next to the other.
+  const [descState, setDescState] = useState({})
   // Ids currently showing their override dropdown -- only ever matched rows;
   // an unmatched row's dropdown is always shown, so it never needs this.
   const [overriding, setOverriding] = useState(() => new Set())
@@ -87,6 +90,11 @@ export default function FarvisionVerifyPage() {
   // a client-side convenience toggle for picking an Account Head, never part
   // of what gets exported (confirmed with the user).
   const [showDesc, setShowDesc] = useState(() => new Set())
+  // Ids currently showing the Description override dropdown -- lets any row
+  // change its auto-computed Description/Deduction Type (e.g. to "TDS
+  // PAYABLE (NIL)"), confirmed with the user, not just rows that came back
+  // blank.
+  const [editingDescription, setEditingDescription] = useState(() => new Set())
 
   const load = (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true)
@@ -107,6 +115,8 @@ export default function FarvisionVerifyPage() {
         setRowState({})
         setOverriding(new Set())
         setSkipped(new Set())
+        setDescState({})
+        setEditingDescription(new Set())
       })
       .catch((err) => toast.error(err.message))
       .finally(() => { setLoading(false); setLoadProgress(null) })
@@ -123,6 +133,7 @@ export default function FarvisionVerifyPage() {
         bank_names: Array.isArray(data?.bank_names) ? data.bank_names : [],
         account_heads: data?.account_heads && typeof data.account_heads === 'object'
           ? data.account_heads : {},
+        descriptions: Array.isArray(data?.descriptions) ? data.descriptions : [],
       }))
       .catch((err) => toast.error(err.message))
   }, [])
@@ -165,6 +176,36 @@ export default function FarvisionVerifyPage() {
       setRowState((prev) => ({ ...prev, [row.id]: 'saved' }))
     } catch (err) {
       setRowState((prev) => ({ ...prev, [row.id]: err.message || 'Could not save' }))
+    }
+  }
+
+  const toggleEditDescription = (id) => {
+    setEditingDescription((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleResolveDescription = async (row, description) => {
+    if (!description) return
+    setDescState((prev) => ({ ...prev, [row.id]: 'saving' }))
+    try {
+      await resolveFarvisionVerifyDescription(row.id, description)
+      // Deduction Type is never stored on its own -- the export always
+      // derives it from whether Description ends up set, so it flips to
+      // "Tax deducted at source" here the same way farvision.py would.
+      setRows((prev) => prev.map((r) =>
+        r.id === row.id ? { ...r, Description: description, 'Deduction Type': 'Tax deducted at source' } : r))
+      setEditingDescription((prev) => {
+        const next = new Set(prev)
+        next.delete(row.id)
+        return next
+      })
+      setDescState((prev) => ({ ...prev, [row.id]: 'saved' }))
+    } catch (err) {
+      setDescState((prev) => ({ ...prev, [row.id]: err.message || 'Could not save' }))
     }
   }
 
@@ -369,6 +410,59 @@ export default function FarvisionVerifyPage() {
                               {descOpen && (
                                 <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 break-words">
                                   {showValue(row.desc)}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        }
+                        if (col === 'Description') {
+                          const isEditingDesc = editingDescription.has(row.id)
+                          const dState = descState[row.id]
+                          return (
+                            <td key={col} className="px-4 py-3 align-top text-slate-700 max-w-xs">
+                              {isEditingDesc ? (
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    className="input py-1 text-xs"
+                                    defaultValue=""
+                                    disabled={dState === 'saving'}
+                                    onChange={(e) => handleResolveDescription(row, e.target.value)}
+                                  >
+                                    <option value="" disabled>Choose Description...</option>
+                                    {candidates.descriptions.map((opt) => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                  {dState === 'saving' && <Spinner size="sm" />}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleEditDescription(row.id)}
+                                    className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                                  >
+                                    cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <div className="break-words">{showValue(row[col])}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleEditDescription(row.id)}
+                                    title="Change this row's Description"
+                                    className="shrink-0 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                                  >
+                                    change
+                                  </button>
+                                  {dState === 'saved' && (
+                                    <span className="inline-flex shrink-0 items-center text-green-700">
+                                      <Check className="h-3.5 w-3.5" />
+                                    </span>
+                                  )}
+                                  {typeof dState === 'string' && dState !== 'saving' && dState !== 'saved' && (
+                                    <span className="shrink-0 text-xs font-medium text-red-700" title={dState}>
+                                      not saved
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </td>
