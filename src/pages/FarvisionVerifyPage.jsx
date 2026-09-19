@@ -176,6 +176,10 @@ export default function FarvisionVerifyPage() {
               ...r,
               [ACCOUNT_HEAD_COLUMN]: accountHead,
               'Parent Account Head': result.parent_account_head,
+              // farvision.py's _build_row always sets Payee Name equal to
+              // whatever Account Head a row resolved to (override included)
+              // -- kept in sync here the same way, confirmed with the user.
+              'Payee Name': accountHead,
               matched: true,
             }
           : r))
