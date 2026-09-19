@@ -965,3 +965,13 @@ export async function resolveFarvisionVerifyTdsRate(id, tdsRate) {
   })
   return data
 }
+
+// Scoped to whatever filters the Verify page currently has active -- same
+// params the listing/export endpoints take -- not a blanket reset of every
+// row this company has ever exported.
+export async function resetFarvisionExportStatus(params = {}) {
+  const { data } = await api.post('/transactions/temp-trans/farvision-verify/reset-export-status', null, {
+    params,
+  })
+  return data
+}
