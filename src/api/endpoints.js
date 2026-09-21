@@ -437,15 +437,15 @@ export async function finalizeRow(rowId) {
 
 // The "Send to Ledger" button on Imported Rows. Whole-company, not scoped
 // by the page's own filters (confirmed with the user) -- every not-yet-
-// posted staged row this user can see. Succeeds with {finalized,
-// skipped_unlocked}, or throws with err.reason set to 'unlocked' or
-// 'not_aligned' and err.count set to how many rows failed that gate -- see
-// backend routers/transactions.py's send_to_ledger for what each means.
+// posted staged row this user can see. The only gate is locked/unlocked --
+// a lock is the user's own signal that a row's heads are finished and
+// correct, so this does not re-run Check Rules itself. Succeeds with
+// {finalized, skipped_unlocked}, or throws with err.reason === 'unlocked'
+// and err.count set to how many rows aren't locked -- see backend
+// routers/transactions.py's send_to_ledger.
 //
 // skipUnlocked is the popup's second button: an unlocked row is dropped from
-// the send instead of blocking it, and stays in staging untouched. There is
-// no equivalent for a rules conflict -- that always blocks, since a
-// misaligned head is wrong data, not a row someone just hasn't locked yet.
+// the send instead of blocking it, and stays in staging untouched.
 export async function sendToLedger(skipUnlocked = false) {
   try {
     const { data } = await api.post(
