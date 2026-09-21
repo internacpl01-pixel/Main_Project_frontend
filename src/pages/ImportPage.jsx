@@ -4,13 +4,14 @@ import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
   getDriveFolderSettings, listDriveFiles, skipDriveFile, fetchDriveLinkFile,
+  cancelImportJob,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers, HardDrive, Search, EyeOff, Copy, RotateCcw,
+  Layers, HardDrive, Search, EyeOff, Copy, RotateCcw, Square,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -32,7 +33,7 @@ import {
 // not yet been given the bytes to begin.
 async function importFile(file, bankId = null, password = '', pages = '',
                           batchPages = null, onProgress, sheets = '',
-                          onUploadPercent) {
+                          onUploadPercent, onJobId) {
   const ext = file.name.split('.').pop().toLowerCase()
   let started
   if (ext === 'pdf') {
@@ -46,6 +47,10 @@ async function importFile(file, bankId = null, password = '', pages = '',
     started = await importExcel(file, true, bankId,
                                 { sheets, background: true, onUploadPercent })
   }
+  // Handed to the caller as soon as it exists, so a Stop button can reach
+  // this exact run -- onProgress's first reading arrives a poll interval
+  // later, which is otherwise how long Stop would stay unable to do anything.
+  if (onJobId) onJobId(started.job_id)
   return pollImportJob(started.job_id, onProgress)
 }
 
@@ -88,6 +93,15 @@ export default function ImportPage() {
   const [batchPages, setBatchPages] = useState('')
   // The last reading from the running job, or null when nothing is running.
   const [progress, setProgress] = useState(null)
+  // The job the Stop button on ImportProgressOverlay would cancel -- whichever
+  // of the single/batch/Drive flows is currently running, or null between
+  // them and before the first one has a job id at all (see importFile's
+  // onJobId). One field for all three: only one of them can ever be running
+  // at once, since each sets `importing`/`batchRunning`/`driveRunning` for
+  // the length of its own run and the buttons that start another are
+  // disabled while any of those is true.
+  const [currentJobId, setCurrentJobId] = useState(null)
+  const [stoppingImport, setStoppingImport] = useState(false)
   // How much of the file has reached the server, 0-100, or null once it has
   // all landed and the server has taken over. Its own state and not folded
   // into `progress`, because they measure different things: this one is the
@@ -276,6 +290,7 @@ export default function ImportPage() {
       setBatchIndex(i + 1)
       setProgress(null)
       setUploadPct(0)
+      setCurrentJobId(null)
       try {
         // Pages/batch-pages are PDF-only settings, same as the single-file
         // form -- importFile itself ignores them for an Excel/CSV file in
@@ -283,10 +298,25 @@ export default function ImportPage() {
         const res = await importFile(f, bankId || null, '', pages.trim(),
                                      batchPages.trim() === '' ? null : Number(batchPages),
                                      setProgress, '',
-                                     (pct) => setUploadPct(pct >= 100 ? null : pct))
+                                     (pct) => setUploadPct(pct >= 100 ? null : pct),
+                                     setCurrentJobId)
         results.push({ name: f.name, status: res.row_count > 0 ? 'done' : 'empty',
                       rowCount: res.row_count })
       } catch (err) {
+        if (err.jobCancelled) {
+          // Stops the whole batch, not just this file -- a person reaching
+          // for Stop mid-batch means "enough", not "skip this one".
+          results.push({ name: f.name, status: 'failed', error: 'Stopped.' })
+          for (let j = i + 1; j < batchFiles.length; j++) {
+            results.push({ name: batchFiles[j].name, status: 'failed', error: 'Not started — batch stopped.' })
+          }
+          setBatchResults(results)
+          setBatchRunning(false)
+          setCurrentJobId(null)
+          setStoppingImport(false)
+          toast('Import stopped.', { icon: '⏹️' })
+          return
+        }
         // A bank with a saved password is already tried automatically (see
         // process_pdf_import) before this is ever reached -- so a password
         // problem surfacing here means it was missing or wrong, and this
@@ -302,6 +332,7 @@ export default function ImportPage() {
     }
     setBatchResults(results)
     setBatchRunning(false)
+    setCurrentJobId(null)
     const failedCount = results.filter((r) => r.status === 'failed').length
     const pwCount = results.filter((r) => r.status === 'password_required').length
     const totalRows = results.reduce((s, r) => s + (r.rowCount || 0), 0)
@@ -472,10 +503,12 @@ export default function ImportPage() {
     setDriveRunning(true)
     setProgress(null)
     setDriveResults(null)
+    setCurrentJobId(null)
     try {
       const jobId = await startDriveImportJob(
         pages.trim(), batchPages.trim() === '' ? null : Number(batchPages),
         selectedFiles)
+      setCurrentJobId(jobId)
       // Reuses the same `progress` state the single-file and batch flows
       // already drive ImportProgressOverlay from -- a Drive run reports
       // itself in the exact same step shape (one step per file here, the
@@ -495,10 +528,19 @@ export default function ImportPage() {
         toast.error(`${parts.join(', ')} of ${res.files.length} files`)
       }
     } catch (err) {
-      toast.error(err.message || 'Drive import failed')
+      // Whatever the job's own `results` held at the moment it was stopped
+      // is gone here -- the Drive runner only reports that list once, on
+      // `finish`, and a cancelled run never reaches it. This is the one
+      // place that list would be worth keeping, but the files it already
+      // finished are still renamed "_done" in Drive either way, so nothing
+      // about them is actually lost -- only this run's own summary of them.
+      if (err.jobCancelled) toast('Import stopped.', { icon: '⏹️' })
+      else toast.error(err.message || 'Drive import failed')
     } finally {
       setDriveRunning(false)
       setProgress(null)
+      setCurrentJobId(null)
+      setStoppingImport(false)
     }
   }
 
@@ -555,6 +597,7 @@ export default function ImportPage() {
     setPwError('')
     setProgress(null)
     setUploadPct(0)
+    setCurrentJobId(null)
     try {
       const res = await importFile(file, bankId || null, password, pages.trim(),
                                    batchPages.trim() === '' ? null : Number(batchPages),
@@ -562,7 +605,8 @@ export default function ImportPage() {
                                    // At 100 the browser has handed over every
                                    // byte; from here the wait belongs to the
                                    // parse, which reports itself.
-                                   (pct) => setUploadPct(pct >= 100 ? null : pct))
+                                   (pct) => setUploadPct(pct >= 100 ? null : pct),
+                                   setCurrentJobId)
       // A beat before the overlay comes down. pollImportJob reports the job one
       // last time with state 'done', so at this moment every step on screen has
       // just gone green — closing instantly would take that away in the same
@@ -578,9 +622,12 @@ export default function ImportPage() {
         )
       } else toast.error('No transaction rows could be extracted from this file.')
     } catch (err) {
-      // A wrong or missing password keeps the form up with the reason inline,
-      // rather than a toast that disappears before it can be acted on.
-      if (isPasswordProblem(err.message)) {
+      if (err.jobCancelled) {
+        toast('Import stopped.', { icon: '⏹️' })
+      } else if (isPasswordProblem(err.message)) {
+        // A wrong or missing password keeps the form up with the reason
+        // inline, rather than a toast that disappears before it can be
+        // acted on.
         setPwError(password
           ? 'That password did not unlock the PDF. Check it and try again.'
           : 'This PDF is password-protected. Enter its password to continue.')
@@ -591,6 +638,26 @@ export default function ImportPage() {
       setImporting(false)
       setProgress(null)
       setUploadPct(null)
+      setCurrentJobId(null)
+      setStoppingImport(false)
+    }
+  }
+
+  // The overlay's red Stop button. Reused across the single-file, batch, and
+  // Drive flows -- currentJobId always names whichever one is actually
+  // running, since only one of them can be at once (see its declaration).
+  const handleStopImport = async () => {
+    if (!currentJobId) return
+    setStoppingImport(true)
+    try {
+      await cancelImportJob(currentJobId)
+      // Nothing else to do here: the running poll (pollImportJob, in
+      // whichever handler started it) sees state 'cancelled' on its very
+      // next reading and throws, which that handler's own catch turns into
+      // the "Import stopped." toast and tears the overlay down.
+    } catch (err) {
+      toast.error(err.message || 'Could not stop the import')
+      setStoppingImport(false)
     }
   }
 
@@ -1302,7 +1369,7 @@ export default function ImportPage() {
               ))}
             </div>
 
-            <div className="flex justify-center">
+            <div className="flex justify-center gap-2">
               <button
                 onClick={handleImportBatch}
                 disabled={batchRunning || !!pageSpecErrorText}
@@ -1320,6 +1387,22 @@ export default function ImportPage() {
                   <><Upload className="h-4 w-4 mr-1.5" />Import {batchFiles.length} Files</>
                 )}
               </button>
+              {/* Stops after the file currently parsing -- see
+                  handleImportBatch's jobCancelled branch, which marks every
+                  file from here on "Not started" instead of trying the rest. */}
+              {batchRunning && currentJobId && (
+                <button
+                  onClick={handleStopImport}
+                  disabled={stoppingImport}
+                  className="flex items-center gap-1.5 rounded-lg bg-red-500
+                             px-3 py-2 text-sm font-semibold text-white
+                             transition-colors hover:bg-red-600
+                             disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                  {stoppingImport ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1605,6 +1688,8 @@ export default function ImportPage() {
         stepWord={driveRunning ? 'File' : stepWord}
         skipUploadStep={driveRunning}
         realProgress={!driveRunning && isPdf}
+        onStop={currentJobId ? handleStopImport : undefined}
+        stopping={stoppingImport}
       />
 
       {/* --- Drive file picker -------------------------------------------- */}

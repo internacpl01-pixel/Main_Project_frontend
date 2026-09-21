@@ -658,7 +658,23 @@ export async function pollImportJob(jobId, onProgress, intervalMs = 900) {
       e.jobFailed = true
       throw e
     }
+    if (job.state === 'cancelled') {
+      const e = new Error('Import stopped.')
+      e.jobCancelled = true
+      throw e
+    }
   }
+}
+
+// The red Stop button on ImportProgressOverlay. Best-effort: the overlay
+// comes down and the poll above stops the moment the job registry marks the
+// job cancelled, but a page-by-page read already running on the server's
+// executor thread finishes in the background regardless -- nothing it finds
+// is ever written, since both runners only stage rows after the point a
+// cancelled run's own task stops resuming. See services/jobs.py::cancel.
+export async function cancelImportJob(jobId) {
+  const { data } = await api.post(`/imports/jobs/${jobId}/cancel`)
+  return data
 }
 
 // Starts importing every un-marked file in the one configured Google Drive

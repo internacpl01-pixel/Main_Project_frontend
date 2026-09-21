@@ -19,7 +19,7 @@
  * between "this is working" and "this has hung".
  */
 import { useEffect, useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, Square } from 'lucide-react'
 
 // One step's slot, in px. Fixed rather than measured: the list is translated by
 // a multiple of it, and a measured height would have to be re-read on every
@@ -176,6 +176,13 @@ export default function ImportProgressOverlay({
   // Defaults true so a plain single-PDF import -- the original, still most
   // common caller -- keeps behaving exactly as before this prop existed.
   realProgress = true,
+  // Wired to POST /imports/jobs/{id}/cancel by the caller, which holds the
+  // job id this overlay never sees itself. Omitted entirely (rather than
+  // just disabled) for a caller with no job to stop yet -- the moment before
+  // the first progress reading arrives, when there is nothing running on the
+  // server for Stop to reach.
+  onStop,
+  stopping = false,
 }) {
   // The header-page read, remembered once seen — see buildSteps.
   const [sawProbe, setSawProbe] = useState(false)
@@ -363,15 +370,37 @@ export default function ImportProgressOverlay({
             rather than floating below the card, so the panel reads as one
             object instead of a list with captions drifting under it. */}
         <div className="relative border-t border-white/10 px-6 py-3">
-          <div className="flex flex-wrap items-center gap-x-2 text-xs text-white/45">
-            {progress?.total_pages ? <span>{progress.total_pages} pages</span> : null}
-            {overall !== null && overall !== undefined
-              ? <span>· {overall}% of the file</span> : null}
-            {elapsed ? <span>· {elapsed} elapsed</span> : null}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 text-xs text-white/45">
+                {progress?.total_pages ? <span>{progress.total_pages} pages</span> : null}
+                {overall !== null && overall !== undefined
+                  ? <span>· {overall}% of the file</span> : null}
+                {elapsed ? <span>· {elapsed} elapsed</span> : null}
+              </div>
+              <p className="mt-1 text-xs text-white/30">
+                Keep this tab open — closing it loses track of the import.
+              </p>
+            </div>
+            {/* Only shown once there is a job on the server to actually stop --
+                see the onStop prop note above. Red because this throws away
+                whatever this run has parsed so far and nothing here asks for
+                confirmation first: the whole point is to be immediate. */}
+            {onStop && (
+              <button
+                type="button"
+                onClick={onStop}
+                disabled={stopping}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg
+                           bg-red-500/90 px-3 py-1.5 text-xs font-semibold
+                           text-white transition-colors hover:bg-red-500
+                           disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                {stopping ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
           </div>
-          <p className="mt-1 text-xs text-white/30">
-            Keep this tab open — closing it loses track of the import.
-          </p>
         </div>
       </div>
     </div>
