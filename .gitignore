@@ -8,7 +8,7 @@ dist
 .vite
 .vercel
 
-# Secrets. VITE_API_BASE_URL is set in Vercel's Environment Variables, because
+# Secrets. API_BASE_URL is set in Vercel's Environment Variables, because
 # Vite inlines it at build time and so it has to exist on the build host.
 .env
 .env.*
