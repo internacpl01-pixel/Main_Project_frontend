@@ -523,17 +523,23 @@ export default function StagingPage() {
     setClearing(true)
     try {
       const res = await clearTempTrans()
+      // A posted row is left behind on purpose now, not an error case -- see
+      // the backend's clear_temp_trans. Said only when it actually happened,
+      // so an ordinary clear (nothing posted yet) keeps the plain sentence.
       toast.success(
         `Cleared ${res.rows_removed} staged ${res.rows_removed === 1 ? 'row' : 'rows'}` +
-        ` from ${res.batches_removed} ${res.batches_removed === 1 ? 'batch' : 'batches'}`
+        ` from ${res.batches_removed} ${res.batches_removed === 1 ? 'batch' : 'batches'}` +
+        (res.skipped_posted
+          ? ` — ${res.skipped_posted} already-posted ${res.skipped_posted === 1 ? 'row was' : 'rows were'} left alone`
+          : '')
       )
       setClearOpen(false)
       load()
       // Every account number and company that was on offer just went with it.
       loadFilterOptions()
     } catch (err) {
-      // 409 when rows are already posted — the message names the count, so it
-      // is shown as-is and the dialog stays open.
+      // 409 only for locked rows now — a posted row no longer blocks this at
+      // all, it is just skipped and reported in the success toast above.
       toast.error(err.message)
     } finally {
       setClearing(false)
@@ -711,7 +717,7 @@ export default function StagingPage() {
             <button
               onClick={() => handleSendToLedger()}
               disabled={sendingToLedger || !summary?.staged_total}
-              title="Post every not-yet-posted row to the ledger -- only once every row is locked and every head matches the rules, company-wide"
+              title="Post every not-yet-posted, locked row to the ledger, company-wide"
               className="btn-secondary btn-sm"
             >
               {sendingToLedger ? (
@@ -727,7 +733,7 @@ export default function StagingPage() {
                 disabled={!summary?.staged_total}
                 title={
                   summary?.posted
-                    ? `${summary.posted} staged row(s) are already posted — clearing is blocked`
+                    ? `Remove every not-yet-posted row and batch — ${summary.posted} already-posted row(s) will be left alone`
                     : 'Remove every staged row and its batch'
                 }
                 className="btn btn-sm border-red-200 bg-white text-red-600 enabled:hover:bg-red-50 enabled:hover:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1325,13 +1331,15 @@ export default function StagingPage() {
         onConfirm={handleClear}
         title="Clear staging table"
         message={
-          `Delete all ${summary?.staged_total ?? 0} staged ` +
-          `${summary?.staged_total === 1 ? 'row' : 'rows'} and the ` +
-          `${summary?.batches ?? 0} ${summary?.batches === 1 ? 'batch' : 'batches'} ` +
-          'they came from? Nothing already posted to the ledger is touched — if any ' +
-          'staged row has been finalized, this is refused instead. Clearing the batches ' +
-          'also releases their file fingerprints, so the same statements can be imported ' +
-          'again. This cannot be undone.'
+          `Delete every NOT-yet-posted staged row and the batches ` +
+          `they came from?` +
+          (summary?.posted
+            ? ` ${summary.posted} row(s) already posted to the ledger are ` +
+              `left exactly as they are — send them back from the Ledger ` +
+              `page first if you want those cleared too.`
+            : '') +
+          ' Clearing a batch releases its file fingerprint, so the same ' +
+          'statement can be imported again. This cannot be undone.'
         }
         confirmText={clearing ? 'Clearing...' : 'Clear everything'}
         busy={clearing}
