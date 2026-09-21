@@ -732,6 +732,20 @@ export async function skipDriveFile(fileId) {
   return data
 }
 
+// Same outcome as calling skipDriveFile once per id, but as ONE request: the
+// single-file endpoint re-lists the whole Drive folder every time it's
+// called just to confirm the id belongs to it, so firing it once per file
+// with Promise.all (the "Skip N" button used to) meant N *concurrent* full
+// folder listings plus N renames -- enough concurrent load to crash a small
+// Render instance outright when N was ~70. This hits one endpoint that lists
+// the folder once and renames every file against that single snapshot.
+export async function skipDriveFiles(fileIds) {
+  const form = new FormData()
+  form.append('file_ids', fileIds.join(','))
+  const { data } = await api.post('/imports/drive-files/skip-batch', form)
+  return data
+}
+
 // The permanent history behind DriveImportLogPage -- every outcome
 // /imports/from-drive (or its retry-password endpoint) has ever recorded,
 // which outlives the job registry a run's own progress overlay reads from.

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
-  getDriveFolderSettings, listDriveFiles, skipDriveFile, fetchDriveLinkFile,
-  cancelImportJob,
+  getDriveFolderSettings, listDriveFiles, skipDriveFile, skipDriveFiles,
+  fetchDriveLinkFile, cancelImportJob,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -412,7 +412,10 @@ export default function ImportPage() {
   const handleSkipUnmatched = async () => {
     setSkippingUnmatched(true)
     try {
-      await Promise.all(unmatchedList.map((f) => skipDriveFile(f.id)))
+      // One request, not one per file -- see skipDriveFiles: the old
+      // Promise.all here fired a full Drive folder listing PER file,
+      // concurrently, which is what crashed the backend on a ~70-file list.
+      await skipDriveFiles(unmatchedList.map((f) => f.id))
       const skippedIds = new Set(unmatchedList.map((f) => f.id))
       setPickerFiles((prev) => prev.filter((f) => !skippedIds.has(f.id)))
       setPickerSelected((prev) => {
