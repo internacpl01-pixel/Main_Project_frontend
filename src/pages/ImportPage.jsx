@@ -4,14 +4,14 @@ import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
   getDriveFolderSettings, listDriveFiles, skipDriveFile, skipDriveFiles,
-  fetchDriveLinkFile, cancelImportJob,
+  fetchDriveLinkFile, verifyDriveLinkFile, cancelImportJob,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
 import toast from 'react-hot-toast'
 import {
   Upload, FileText, X, File, CheckCircle, AlertCircle, Lock, ArrowRight, Info,
-  Layers, HardDrive, Search, EyeOff, Copy, RotateCcw, Square,
+  Layers, HardDrive, Search, EyeOff, Copy, RotateCcw, Square, ShieldCheck,
 } from 'lucide-react'
 
 // One step, like DPL: the file is parsed and written on the same request.
@@ -171,6 +171,12 @@ export default function ImportPage() {
   // the exact same code path as a computer-picked file.
   const [driveLinkUrl, setDriveLinkUrl] = useState('')
   const [driveLinkLoading, setDriveLinkLoading] = useState(false)
+  // The last Verify result for the CURRENT driveLinkUrl -- {name} on success,
+  // or null. Cleared the moment the box is edited, same reasoning as the
+  // Drive folder settings' own Verify: a checkmark left over from a link
+  // that has since been changed would read as confirming the new one.
+  const [driveLinkVerified, setDriveLinkVerified] = useState(null)
+  const [driveLinkVerifying, setDriveLinkVerifying] = useState(false)
   const fileInput = useRef()
   const navigate = useNavigate()
 
@@ -271,11 +277,29 @@ export default function ImportPage() {
     try {
       const f = await fetchDriveLinkFile(driveLinkUrl.trim())
       setDriveLinkUrl('')
+      setDriveLinkVerified(null)
       handleFileSelection([f])
     } catch (err) {
       toast.error(err.message || 'Could not fetch that Drive file')
     } finally {
       setDriveLinkLoading(false)
+    }
+  }
+
+  // Confirms the link resolves to an actual file, and which one, before
+  // Fetch commits to downloading it -- the file-link version of the Drive
+  // folder setting's own Verify button. Writes nothing, downloads nothing.
+  const handleVerifyDriveLink = async () => {
+    if (!driveLinkUrl.trim()) return
+    setDriveLinkVerifying(true)
+    setDriveLinkVerified(null)
+    try {
+      const r = await verifyDriveLinkFile(driveLinkUrl.trim())
+      setDriveLinkVerified(r)
+    } catch (err) {
+      toast.error(err.message || 'Could not verify that Drive link')
+    } finally {
+      setDriveLinkVerifying(false)
     }
   }
 
@@ -762,26 +786,51 @@ export default function ImportPage() {
 
       {source === 'computer' && !file && !result && batchFiles.length === 0 && batchResults.length === 0 && (
         <div className="card">
-          <div className="card-body flex items-center gap-3">
-            <input
-              type="text"
-              value={driveLinkUrl}
-              onChange={(e) => setDriveLinkUrl(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleDriveLinkImport() }}
-              placeholder="Or paste a Google Drive link to the statement (or a Google Sheet)"
-              className="input flex-1"
-              disabled={driveLinkLoading}
-            />
-            <button
-              onClick={handleDriveLinkImport}
-              disabled={driveLinkLoading || !driveLinkUrl.trim()}
-              className="btn-secondary shrink-0"
-            >
-              {driveLinkLoading
-                ? <Spinner size="sm" />
-                : <><HardDrive className="h-4 w-4 mr-1.5" />Fetch from Drive</>}
-            </button>
+          <div className="card-body">
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={driveLinkUrl}
+                onChange={(e) => {
+                  setDriveLinkUrl(e.target.value)
+                  // Stale the moment the link changes -- a checkmark left
+                  // over from the previous link would read as confirming
+                  // this one, the same reasoning the Drive folder setting's
+                  // own Verify follows.
+                  setDriveLinkVerified(null)
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleDriveLinkImport() }}
+                placeholder="Or paste a Google Drive link to the statement (or a Google Sheet)"
+                className="input flex-1"
+                disabled={driveLinkLoading}
+              />
+              <button
+                onClick={handleVerifyDriveLink}
+                disabled={driveLinkVerifying || driveLinkLoading || !driveLinkUrl.trim()}
+                title="Check the link opens, without downloading or importing anything"
+                className="btn-secondary shrink-0"
+              >
+                {driveLinkVerifying
+                  ? <Spinner size="sm" />
+                  : <><ShieldCheck className="h-4 w-4 mr-1.5" />Verify</>}
+              </button>
+              <button
+                onClick={handleDriveLinkImport}
+                disabled={driveLinkLoading || !driveLinkUrl.trim()}
+                className="btn-secondary shrink-0"
+              >
+                {driveLinkLoading
+                  ? <Spinner size="sm" />
+                  : <><HardDrive className="h-4 w-4 mr-1.5" />Fetch from Drive</>}
+              </button>
+            </div>
+            {driveLinkVerified && (
+              <p className="mt-2 flex items-center gap-1.5 text-sm text-emerald-700">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                Found "{driveLinkVerified.name}" — click Fetch from Drive to import it.
+              </p>
+            )}
           </div>
         </div>
       )}

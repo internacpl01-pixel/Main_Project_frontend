@@ -868,6 +868,17 @@ export async function updateDriveImportFolder(url) {
   return data
 }
 
+// Checks a pasted Drive file link WITHOUT downloading or importing it --
+// resolves the id and returns its own {name, mime_type}, so a person can
+// confirm it's the statement they meant before running Fetch. Safe to call
+// as often as the box is edited; writes nothing, downloads nothing.
+export async function verifyDriveLinkFile(url) {
+  const form = new FormData()
+  form.append('url', url)
+  const { data } = await api.post('/imports/drive-link/verify', form)
+  return data
+}
+
 // Pulls a single pasted Drive file (an .xlsx/.xls/.csv/.pdf, or a native
 // Google Sheet, which the backend exports to .xlsx) down as base64 bytes and
 // hands back a ready-to-use File object -- the caller then feeds it into the

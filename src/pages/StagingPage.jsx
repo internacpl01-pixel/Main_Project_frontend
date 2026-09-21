@@ -963,7 +963,7 @@ export default function StagingPage() {
                 <SkeletonRows cols={columns.length ? columns.length + 1 : 6} />
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 1}>
+                  <td colSpan={columns.length + 1} className="text-center">
                     {/* An empty table has three different causes and they need
                         three different next steps — nothing imported, a search
                         that matched nothing, or a filter left on from earlier.
