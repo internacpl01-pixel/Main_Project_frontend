@@ -435,6 +435,38 @@ export async function finalizeRow(rowId) {
   return data
 }
 
+// The "Send to Ledger" button on Imported Rows. Whole-company, not scoped
+// by the page's own filters (confirmed with the user) -- every not-yet-
+// posted staged row this user can see. Succeeds with {finalized,
+// skipped_unlocked}, or throws with err.reason set to 'unlocked' or
+// 'not_aligned' and err.count set to how many rows failed that gate -- see
+// backend routers/transactions.py's send_to_ledger for what each means.
+//
+// skipUnlocked is the popup's second button: an unlocked row is dropped from
+// the send instead of blocking it, and stays in staging untouched. There is
+// no equivalent for a rules conflict -- that always blocks, since a
+// misaligned head is wrong data, not a row someone just hasn't locked yet.
+export async function sendToLedger(skipUnlocked = false) {
+  try {
+    const { data } = await api.post(
+      '/transactions/temp-trans/send-to-ledger', null,
+      { params: { skip_unlocked: skipUnlocked } })
+    return data
+  } catch (err) {
+    // apiClient's response interceptor already replaces axios's error with a
+    // plain Error (err.message is describeError()'s sentence, taken from
+    // detail.message for an object detail like this one) and stashes the raw
+    // body on err.payload -- there is no err.response by the time it gets
+    // here. reason/count ride on err.payload.detail, not on err itself.
+    const detail = err.payload?.detail
+    if (detail?.reason) {
+      err.reason = detail.reason
+      err.count = detail.count
+    }
+    throw err
+  }
+}
+
 // Check one account's staged rows against its account-type rule (read-only).
 // `payload` is { account_type, account_number }. Returns the judged rows with
 // status ok / conflict / no_direction, plus the heads the rule expects per

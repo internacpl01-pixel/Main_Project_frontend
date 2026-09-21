@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
-  setAllTempRowsLock, resetExportStatus, prepareFarvisionExport,
+  setAllTempRowsLock, resetExportStatus, prepareFarvisionExport, sendToLedger,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import {
   Sparkles, RefreshCw, Pencil, Trash2, X, Highlighter, Lock, Unlock,
-  ShieldCheck, FileSpreadsheet, RotateCcw,
+  ShieldCheck, FileSpreadsheet, RotateCcw, Send,
 } from 'lucide-react'
 
 // The four dropdowns on the edit dialog. Each is a live read of one of the
@@ -157,6 +157,11 @@ export default function StagingPage() {
   // temp_trans field and this is the page that owns temp_trans rows.
   const [resettingExportStatus, setResettingExportStatus] = useState(false)
   const [preparingExport, setPreparingExport] = useState(false)
+  const [sendingToLedger, setSendingToLedger] = useState(false)
+  // Set only when Send to Ledger was refused -- {reason: 'unlocked'|
+  // 'not_aligned', count, message} from the backend (see endpoints.js's
+  // sendToLedger). Drives the popup below; null means nothing to show.
+  const [ledgerBlocked, setLedgerBlocked] = useState(null)
 
   // Master data and the project list are read once per visit and reused for
   // every row — one request each, not one per dropdown per row.
@@ -258,6 +263,42 @@ export default function StagingPage() {
       toast.error(err.message || 'Could not prepare the Farvision export')
     } finally {
       setPreparingExport(false)
+    }
+  }
+
+  // Whole-company, not scoped by this page's own filters -- confirmed with
+  // the user this is deliberate, unlike every other bulk button here. Blocks
+  // entirely (nothing sent) unless every not-yet-posted row is BOTH locked
+  // and has all three heads reading 'ok' from Check Rules -- either failure
+  // opens the popup below rather than silently sending a partial set.
+  // skipUnlocked is the popup's own second button -- an unlocked row is
+  // dropped from the send instead of blocking it. A rules conflict never
+  // gets that option, so a fresh 'not_aligned' block can still come back
+  // here even after skipping past 'unlocked', and the popup just switches
+  // to that message instead of closing.
+  const handleSendToLedger = async (skipUnlocked = false) => {
+    setSendingToLedger(true)
+    try {
+      const { finalized, skipped_unlocked: skippedUnlocked, message } =
+        await sendToLedger(skipUnlocked)
+      if (finalized > 0) {
+        toast.success(
+          `Sent ${finalized} row(s) to the ledger` +
+          (skippedUnlocked ? ` — ${skippedUnlocked} unlocked row(s) left in staging` : '')
+        )
+      } else {
+        toast(message || 'Nothing to send.', { icon: 'ℹ️' })
+      }
+      setLedgerBlocked(null)
+      load()
+    } catch (err) {
+      if (err.reason === 'unlocked' || err.reason === 'not_aligned') {
+        setLedgerBlocked({ reason: err.reason, count: err.count, message: err.message })
+      } else {
+        toast.error(err.message || 'Could not send to the ledger')
+      }
+    } finally {
+      setSendingToLedger(false)
     }
   }
 
@@ -668,6 +709,19 @@ export default function StagingPage() {
                 <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
               )}
               Export Farvision
+            </button>
+            <button
+              onClick={() => handleSendToLedger()}
+              disabled={sendingToLedger || !summary?.staged_total}
+              title="Post every not-yet-posted row to the ledger -- only once every row is locked and every head matches the rules, company-wide"
+              className="btn-secondary btn-sm"
+            >
+              {sendingToLedger ? (
+                <Spinner size="sm" className="mr-1.5" />
+              ) : (
+                <Send className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Send to Ledger
             </button>
             {canWrite && (
               <button
@@ -1229,6 +1283,51 @@ export default function StagingPage() {
         }
         busy={bulkLockBusy}
       />
+
+      {/* Send to Ledger's own popup -- it never partially sends on its own, so
+          a block is normally "fix this, then click it again" rather than a
+          result to review. The one exception is the unlocked case's second
+          button, which deliberately DOES send a partial set -- everything
+          locked and aligned, skipping whatever still isn't locked -- since
+          that was asked for specifically, unlike a rules conflict, which
+          never gets a skip option. */}
+      <Modal
+        isOpen={!!ledgerBlocked}
+        onClose={() => setLedgerBlocked(null)}
+        title={ledgerBlocked?.reason === 'unlocked' ? 'Lock every row first' : 'Some heads still need fixing'}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">{ledgerBlocked?.message}</p>
+          <p className="text-sm text-slate-500">
+            {ledgerBlocked?.reason === 'unlocked'
+              ? 'Clear any filters so every row is visible, then use the padlock ' +
+                'button above to lock all of them, and try Send to Ledger again. ' +
+                'Or leave the unlocked ones for later and send everything else now.'
+              : 'Open Check Rules for each account, resolve every conflict and ' +
+                'fill in any head with no rule yet, then try Send to Ledger again.'}
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setLedgerBlocked(null)}
+              className="btn-secondary btn-sm"
+            >
+              {ledgerBlocked?.reason === 'unlocked' ? 'Cancel' : 'Got it'}
+            </button>
+            {ledgerBlocked?.reason === 'unlocked' && (
+              <button
+                onClick={() => handleSendToLedger(true)}
+                disabled={sendingToLedger}
+                className="btn-primary btn-sm"
+              >
+                {sendingToLedger ? (
+                  <Spinner size="sm" tone="white" className="mr-1.5" />
+                ) : null}
+                Skip unlocked, send the rest
+              </button>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         isOpen={clearOpen}
