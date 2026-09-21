@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   fetchTransactions, fetchTransactionFilters, deleteAllTransactions,
+  reverseTransaction,
 } from '../api/endpoints.js'
 import {
   EmptyState, ConfirmDialog, SearchInput, Pagination, TableBusy, SkeletonRows,
@@ -11,7 +12,7 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { RefreshCw, Trash2 } from 'lucide-react'
+import { RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
 
 // Which column types are printed right-aligned with thousands separators. Taken
 // from the column's declared type rather than its name, so a company that calls
@@ -29,8 +30,10 @@ const RESOLVED = [
 
 export default function LedgerPage() {
   // Emptying the ledger is company admin, not manager: clearing staging throws
-  // away unposted work, this throws away the posted record.
-  const { canAdmin } = useAuth()
+  // away unposted work, this throws away the posted record. Reversing one row
+  // is the much smaller action and only needs canWrite (manager+), matching
+  // the level the backend itself requires.
+  const { canAdmin, canWrite } = useAuth()
   const [columns, setColumns] = useState([])
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
@@ -43,6 +46,13 @@ export default function LedgerPage() {
   // is big. It used to close its dialog and then run in silence, so the only
   // thing on screen was the rows it was in the middle of removing.
   const [clearing, setClearing] = useState(false)
+  // The row a reversal confirm dialog is open for, or null. Confirmed rather
+  // than instant: it's reversible in the sense that matters (Delete All's own
+  // dialog says the same thing), but it still removes a permanent-looking
+  // ledger line the moment it's clicked, and a stray click on a dense table
+  // is exactly the case a confirm step exists for.
+  const [reverseTarget, setReverseTarget] = useState(null)
+  const [reversing, setReversing] = useState(false)
 
   // Sorted and filtered in SQL, not here: the ledger is server-paged, so the
   // browser only ever holds one page and reordering it would leave every other
@@ -93,6 +103,22 @@ export default function LedgerPage() {
   }
 
   const handleFilters = (next) => { setFilters(next); setPage(1) }
+
+  const runReverse = async () => {
+    if (!reverseTarget) return
+    setReversing(true)
+    try {
+      await reverseTransaction(reverseTarget.id)
+      toast.success('Sent back to Imported Rows')
+      setReverseTarget(null)
+      load()
+      loadFilterOptions()
+    } catch (err) {
+      toast.error(err.message || 'Could not reverse this transaction')
+    } finally {
+      setReversing(false)
+    }
+  }
 
   const runClearAll = async () => {
     setClearing(true)
@@ -224,6 +250,11 @@ export default function LedgerPage() {
                     onSort={handleSort}
                   />
                 ))}
+                {/* Not a SortHeader -- there is nothing to sort a button
+                    column by. canWrite-gated same as the button itself, so
+                    a read-only viewer never sees an empty header for a
+                    column that would never show anything in their rows. */}
+                {canWrite && <th className="px-6 py-3 w-10" />}
               </tr>
             </thead>
             <tbody>
@@ -232,11 +263,13 @@ export default function LedgerPage() {
                 // real ones arrive. The column set comes back with them, so on
                 // the first render there is nothing to count yet.
                 <SkeletonRows
-                  cols={columns.length ? columns.length + RESOLVED.length : 6}
+                  cols={columns.length
+                    ? columns.length + RESOLVED.length + (canWrite ? 1 : 0)
+                    : 6}
                 />
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + RESOLVED.length} className="px-6 py-16">
+                  <td colSpan={columns.length + RESOLVED.length + (canWrite ? 1 : 0)} className="px-6 py-16">
                     {/* A filter left on from earlier looks exactly like an
                         empty ledger, so it is named and offered a way out. */}
                     <EmptyState
@@ -279,6 +312,17 @@ export default function LedgerPage() {
                         {row[r.key] || <span className="text-slate-300">—</span>}
                       </td>
                     ))}
+                    {canWrite && (
+                      <td className="px-6 py-3 whitespace-nowrap text-right">
+                        <button
+                          onClick={() => setReverseTarget(row)}
+                          title="Send back to Imported Rows"
+                          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -310,6 +354,20 @@ export default function LedgerPage() {
         }
         confirmText={clearing ? 'Deleting...' : 'Delete all'}
         busy={clearing}
+      />
+
+      <ConfirmDialog
+        isOpen={!!reverseTarget}
+        onClose={() => setReverseTarget(null)}
+        onConfirm={runReverse}
+        title="Send this row back to Imported Rows?"
+        message={
+          'Removes it from the ledger and un-posts it — the staged row keeps ' +
+          'its classification and shows up in Imported Rows again, ready to ' +
+          'be sent to the ledger again once whatever needs fixing is fixed.'
+        }
+        confirmText={reversing ? 'Sending back...' : 'Send back'}
+        busy={reversing}
       />
     </div>
   )

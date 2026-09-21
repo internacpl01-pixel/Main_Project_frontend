@@ -355,6 +355,15 @@ export async function deleteAllTransactions() {
   return data
 }
 
+// The arrow button on one Ledger row. Un-posts it -- the temp_trans row it
+// came from was never touched by posting, so this just removes the ledger
+// entry pointing at it, which is what makes it reappear in Imported Rows
+// and postable again. Manager level, same as most other write actions here.
+export async function reverseTransaction(id) {
+  const { data } = await api.post(`/transactions/${id}/reverse`)
+  return data
+}
+
 export async function fetchTransactionSummary() {
   const { data } = await api.get('/transactions/summary')
   return data
