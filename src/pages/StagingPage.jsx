@@ -70,9 +70,9 @@ export default function StagingPage() {
   const [terms, setTerms] = useState([])
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
-  // Rows matching the current tab and search. summary.staged_total is the
-  // unfiltered count and is what the Clear button reports — the two are
-  // different numbers and mean different things.
+  // Rows matching the current tab and search. summary.unposted is the
+  // unfiltered count of everything not-yet-posted (what Clear All reports and
+  // acts on) — the two are different numbers and mean different things.
   const [total, setTotal] = useState(0)
 
   // Sorting and the three filters are done in SQL, like the search — the
@@ -681,7 +681,7 @@ export default function StagingPage() {
                 the rows may look. */}
             <button
               onClick={() => setRulesOpen(true)}
-              disabled={!summary?.staged_total}
+              disabled={!summary?.unposted}
               title="Check one account's rows against its account-type rule"
               className="btn-primary btn-sm"
             >
@@ -690,7 +690,7 @@ export default function StagingPage() {
             </button>
             <button
               onClick={handleResetExportStatus}
-              disabled={resettingExportStatus || !summary?.staged_total}
+              disabled={resettingExportStatus || !summary?.unposted}
               title="Turn Export Status back off for the rows currently shown, so they can be exported again"
               className="btn-secondary btn-sm"
             >
@@ -703,7 +703,7 @@ export default function StagingPage() {
             </button>
             <button
               onClick={handleExportFarvision}
-              disabled={preparingExport || !summary?.staged_total}
+              disabled={preparingExport || !summary?.unposted}
               title="Marks these rows exported, then opens Farvision Verify to review Account Heads and download"
               className="btn-secondary btn-sm"
             >
@@ -716,7 +716,7 @@ export default function StagingPage() {
             </button>
             <button
               onClick={() => handleSendToLedger()}
-              disabled={sendingToLedger || !summary?.staged_total}
+              disabled={sendingToLedger || !summary?.unposted}
               title="Post every not-yet-posted, locked row to the ledger, company-wide"
               className="btn-secondary btn-sm"
             >
@@ -730,17 +730,17 @@ export default function StagingPage() {
             {canWrite && (
               <button
                 onClick={() => setClearOpen(true)}
-                disabled={!summary?.staged_total}
-                title={
-                  summary?.posted
-                    ? `Remove every not-yet-posted row and batch — ${summary.posted} already-posted row(s) will be left alone`
-                    : 'Remove every staged row and its batch'
-                }
+                disabled={!summary?.unposted}
+                title="Remove every not-yet-posted row and its batch"
                 className="btn btn-sm border-red-200 bg-white text-red-600 enabled:hover:bg-red-50 enabled:hover:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                 Clear All
-                {summary?.staged_total ? ` (${summary.staged_total})` : ''}
+                {/* unposted, not staged_total: a posted row is invisible on
+                    this page and Clear All never touches it, so counting it
+                    here would show a number bigger than what's on screen and
+                    bigger than what the button actually does. */}
+                {summary?.unposted ? ` (${summary.unposted})` : ''}
               </button>
             )}
           </>
@@ -780,8 +780,8 @@ export default function StagingPage() {
             {activeCount(filters) > 0 && !loading && (
               <span className="text-xs text-slate-500">
                 {total.toLocaleString('en-IN')} of{' '}
-                {(summary?.staged_total ?? 0).toLocaleString('en-IN')} staged{' '}
-                {summary?.staged_total === 1 ? 'row' : 'rows'}
+                {(summary?.unposted ?? 0).toLocaleString('en-IN')} staged{' '}
+                {summary?.unposted === 1 ? 'row' : 'rows'}
               </span>
             )}
           </div>
@@ -979,7 +979,7 @@ export default function StagingPage() {
                           : query
                             ? `Nothing matches "${query}".`
                             : activeCount(filters)
-                              ? `${summary?.staged_total ?? 0} rows are staged, but none of them match the filters you have set.`
+                              ? `${summary?.unposted ?? 0} rows are staged, but none of them match the filters you have set.`
                               : 'When you import a statement, rows land here for review.'
                       }
                       action={
