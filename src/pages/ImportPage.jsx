@@ -4,7 +4,7 @@ import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
   getDriveFolderSettings, listDriveFiles, skipDriveFile, skipDriveFiles,
-  fetchDriveLinkFile, verifyDriveLinkFile, cancelImportJob,
+  fetchDriveLinkFile, verifyDriveLinkFile, cancelImportJob, deleteTempRow,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -79,6 +79,18 @@ function isPasswordProblem(message = '') {
 export default function ImportPage() {
   const [file, setFile] = useState(null)
   const [result, setResult] = useState(null)
+  // Rows this import just staged that also exist in an earlier import (same
+  // date/amount/direction/account, or same bank reference number -- see
+  // backend's row_content_hash) -- null when there's nothing to review. Set
+  // right after a successful single-file import; the modal these drive lets
+  // a person delete the ones they don't want, reusing the ordinary per-row
+  // delete endpoint rather than anything import-specific.
+  const [duplicateRows, setDuplicateRows] = useState(null)
+  // Which of duplicateRows' ids are still checked to be removed -- default
+  // is every one of them, since an unwanted repeat is the common case; a
+  // genuine repeat transaction gets unchecked by hand.
+  const [duplicateChecked, setDuplicateChecked] = useState(() => new Set())
+  const [removingDuplicates, setRemovingDuplicates] = useState(false)
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [banks, setBanks] = useState([])
@@ -648,6 +660,13 @@ export default function ImportPage() {
             : `Imported ${res.row_count} rows`
         )
       } else toast.error('No transaction rows could be extracted from this file.')
+      // Opens the review modal only when there's something to review --
+      // the common case (no overlap with anything already staged) shows
+      // the normal result view exactly as before, no extra step.
+      if (res.duplicates?.length) {
+        setDuplicateRows(res.duplicates)
+        setDuplicateChecked(new Set(res.duplicates.map((r) => r.id)))
+      }
     } catch (err) {
       if (err.jobCancelled) {
         toast('Import stopped.', { icon: '⏹️' })
@@ -695,6 +714,36 @@ export default function ImportPage() {
     setPassword(''); setPwError(''); setPages(''); setProgress(null)
     setBatchPages(''); setWorkbook(null); setChosenSheets([]); setInspecting(false)
     setUploadPct(null)
+    setDuplicateRows(null); setDuplicateChecked(new Set())
+  }
+
+  const toggleDuplicateChecked = (id) => {
+    setDuplicateChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Deletes every still-checked duplicate via the same per-row delete
+  // endpoint the Imported Rows page itself uses -- these rows were just
+  // staged by this same import, so none of them can be locked or already
+  // posted, the only two things that endpoint ever refuses.
+  const handleRemoveDuplicates = async () => {
+    const ids = [...duplicateChecked]
+    if (ids.length === 0) { setDuplicateRows(null); return }
+    setRemovingDuplicates(true)
+    try {
+      await Promise.all(ids.map((id) => deleteTempRow(id)))
+      toast.success(`Removed ${ids.length} duplicate ${ids.length === 1 ? 'row' : 'rows'}`)
+      setDuplicateRows(null)
+      setDuplicateChecked(new Set())
+    } catch (err) {
+      toast.error(err.message || 'Could not remove all of the checked rows')
+    } finally {
+      setRemovingDuplicates(false)
+    }
   }
 
   const isPdf = file?.name?.toLowerCase().endsWith('.pdf')
@@ -1913,6 +1962,67 @@ export default function ImportPage() {
               ? <Spinner size="sm" tone="white" className="mr-1.5" />
               : <EyeOff className="h-4 w-4 mr-1.5" />}
             Skip {unmatchedList.length}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Only shown when this import overlapped something already staged --
+          the ordinary case (nothing shared) never sees this at all. Every
+          row here has already been imported; this modal only ever deletes,
+          never blocks a save that already happened. */}
+      <Modal isOpen={!!duplicateRows} onClose={() => setDuplicateRows(null)}
+            title="Possible duplicate rows" size="md">
+        <p className="text-sm text-slate-600 mb-3">
+          {duplicateRows?.length} row{duplicateRows?.length === 1 ? '' : 's'} in
+          this import match a row already staged from an earlier import (same
+          date, amount and direction, or the same bank reference number).
+          Checked rows are removed from THIS import; a genuine repeat
+          transaction can be kept by unchecking it.
+        </p>
+        <div className="max-h-64 overflow-y-auto space-y-1.5 mb-4 rounded-lg border border-slate-200 p-2">
+          {duplicateRows?.map((r) => (
+            <label
+              key={r.id}
+              className="flex items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={duplicateChecked.has(r.id)}
+                onChange={() => toggleDuplicateChecked(r.id)}
+                className="mt-0.5 h-3.5 w-3.5 shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-slate-700">
+                  {r.description || '—'}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {r.txn_date || 'no date'} · {r.credit_debit || ''} {r.amount ?? ''}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setDuplicateChecked(new Set())}
+            disabled={removingDuplicates}
+            className="btn-secondary"
+          >
+            Keep all
+          </button>
+          <button
+            onClick={handleRemoveDuplicates}
+            disabled={removingDuplicates}
+            className="btn-primary"
+          >
+            {removingDuplicates ? (
+              <Spinner size="sm" tone="white" className="mr-1.5" />
+            ) : (
+              <X className="h-4 w-4 mr-1.5" />
+            )}
+            {duplicateChecked.size > 0
+              ? `Remove ${duplicateChecked.size} checked`
+              : 'Done'}
           </button>
         </div>
       </Modal>
