@@ -533,25 +533,47 @@ export default function FarvisionVerifyPage() {
             Columns{hiddenColumns.size > 0 ? ` (${hiddenColumns.size} hidden)` : ''}
           </button>
           {columnPickerOpen && (
-            <div className="absolute right-0 z-10 mt-1 w-64 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-              {displayColumns.map((col) => (
-                <label
-                  key={col}
-                  className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 cursor-pointer"
+            <div className="absolute right-0 z-10 mt-1 w-64 rounded-lg border border-slate-200 bg-white shadow-lg">
+              {/* Outside the scrolling list and always visible, not just the
+                  top of it -- a picker with 20+ columns otherwise makes
+                  "select/clear all" something you have to scroll up to
+                  reach after just scrolling down to see what's there. */}
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-2 py-1.5">
+                <button
+                  type="button"
+                  onClick={() => setHiddenColumns(new Set())}
+                  className="text-xs text-primary-600 hover:underline"
                 >
-                  <input
-                    type="checkbox"
-                    checked={!hiddenColumns.has(col)}
-                    onChange={() => toggleColumnVisible(col)}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span className="truncate">{col}</span>
-                </label>
-              ))}
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHiddenColumns(new Set(displayColumns))}
+                  className="text-xs text-primary-600 hover:underline"
+                >
+                  Clear all
+                </button>
+              </div>
+              <div className="max-h-80 overflow-y-auto p-2">
+                {displayColumns.map((col) => (
+                  <label
+                    key={col}
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!hiddenColumns.has(col)}
+                      onChange={() => toggleColumnVisible(col)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className="truncate">{col}</span>
+                  </label>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={() => setColumnPickerOpen(false)}
-                className="mt-1 w-full rounded px-2 py-1.5 text-center text-xs text-primary-600 hover:bg-slate-50"
+                className="w-full rounded-b-lg border-t border-slate-100 px-2 py-1.5 text-center text-xs text-primary-600 hover:bg-slate-50"
               >
                 Done
               </button>
