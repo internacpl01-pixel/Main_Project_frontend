@@ -624,7 +624,8 @@ const uploadProgress = (onUploadPercent) => (
 
 export async function importPdf(file, save = false, bankId = null, password = '',
                                 { pages = '', background = false,
-                                  batchPages = null, onUploadPercent } = {}) {
+                                  batchPages = null, onUploadPercent,
+                                  allowReimport = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
@@ -643,6 +644,11 @@ export async function importPdf(file, save = false, bankId = null, password = ''
   // With background=true this resolves in milliseconds with a job id, and the
   // parse carries on server-side — see pollImportJob.
   if (background) form.append('background', 'true')
+  // The "import anyway" confirm after a first attempt came back 409
+  // DuplicateFileError -- lets this exact file re-stage instead of refusing,
+  // with row-level duplicate review (see the response's `duplicates`) taking
+  // over from the whole-file check.
+  if (allowReimport) form.append('allow_reimport', 'true')
   const { data } = await api.post('/imports/pdf', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
@@ -920,13 +926,14 @@ export async function inspectExcel(file, { onUploadPercent } = {}) {
 // that looks like a statement. Each sheet becomes its own batch.
 export async function importExcel(file, save = false, bankId = null,
                                   { sheets = '', background = false,
-                                    onUploadPercent } = {}) {
+                                    onUploadPercent, allowReimport = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
   if (bankId) form.append('bank_id', String(bankId))
   if (sheets) form.append('sheets', sheets)
   if (background) form.append('background', 'true')
+  if (allowReimport) form.append('allow_reimport', 'true')
   const { data } = await api.post('/imports/excel', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,
@@ -936,12 +943,14 @@ export async function importExcel(file, save = false, bankId = null,
 }
 
 export async function importCsv(file, save = false, bankId = null,
-                                { background = false, onUploadPercent } = {}) {
+                                { background = false, onUploadPercent,
+                                  allowReimport = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('save', String(save))
   if (bankId) form.append('bank_id', String(bankId))
   if (background) form.append('background', 'true')
+  if (allowReimport) form.append('allow_reimport', 'true')
   const { data } = await api.post('/imports/csv', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: IMPORT_TIMEOUT_MS,

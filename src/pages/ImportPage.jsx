@@ -33,19 +33,20 @@ import {
 // not yet been given the bytes to begin.
 async function importFile(file, bankId = null, password = '', pages = '',
                           batchPages = null, onProgress, sheets = '',
-                          onUploadPercent, onJobId) {
+                          onUploadPercent, onJobId, allowReimport = false) {
   const ext = file.name.split('.').pop().toLowerCase()
   let started
   if (ext === 'pdf') {
     started = await importPdf(file, true, bankId, password,
                               { pages, batchPages, background: true,
-                                onUploadPercent })
+                                onUploadPercent, allowReimport })
   } else if (ext === 'csv') {
     started = await importCsv(file, true, bankId,
-                              { background: true, onUploadPercent })
+                              { background: true, onUploadPercent, allowReimport })
   } else {
     started = await importExcel(file, true, bankId,
-                                { sheets, background: true, onUploadPercent })
+                                { sheets, background: true, onUploadPercent,
+                                  allowReimport })
   }
   // Handed to the caller as soon as it exists, so a Stop button can reach
   // this exact run -- onProgress's first reading arrives a poll interval
@@ -76,6 +77,13 @@ function isPasswordProblem(message = '') {
   return /ENCRYPTED|password-protected|Incorrect password/i.test(message)
 }
 
+// services/staging.py's DuplicateFileError always starts a sentence this
+// way -- matched on that fixed prefix rather than the whole message, since
+// the batch id/date/filename after it vary per file.
+function isDuplicateFileProblem(message = '') {
+  return /already uploaded on/i.test(message)
+}
+
 export default function ImportPage() {
   const [file, setFile] = useState(null)
   const [result, setResult] = useState(null)
@@ -91,6 +99,10 @@ export default function ImportPage() {
   // genuine repeat transaction gets unchecked by hand.
   const [duplicateChecked, setDuplicateChecked] = useState(() => new Set())
   const [removingDuplicates, setRemovingDuplicates] = useState(false)
+  // The DuplicateFileError message, or null -- set when a first attempt at
+  // this exact file came back "already uploaded", driving the "Import
+  // anyway?" confirm below instead of a dead-end toast.
+  const [duplicateFileMessage, setDuplicateFileMessage] = useState(null)
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [banks, setBanks] = useState([])
@@ -623,7 +635,9 @@ export default function ImportPage() {
     e.preventDefault(); setDragOver(false); handleFileSelection(e.dataTransfer.files)
   }
 
-  const handleImport = async () => {
+  // allowReimport is only ever true on the retry fired from the "Import
+  // anyway" confirm below -- the first, ordinary click never sets it.
+  const handleImport = async (allowReimport = false) => {
     const specError = pageSpecError(pages)
     if (specError) { toast.error(specError); return }
 
@@ -645,7 +659,7 @@ export default function ImportPage() {
                                    // byte; from here the wait belongs to the
                                    // parse, which reports itself.
                                    (pct) => setUploadPct(pct >= 100 ? null : pct),
-                                   setCurrentJobId)
+                                   setCurrentJobId, allowReimport)
       // A beat before the overlay comes down. pollImportJob reports the job one
       // last time with state 'done', so at this moment every step on screen has
       // just gone green — closing instantly would take that away in the same
@@ -677,6 +691,13 @@ export default function ImportPage() {
         setPwError(password
           ? 'That password did not unlock the PDF. Check it and try again.'
           : 'This PDF is password-protected. Enter its password to continue.')
+      } else if (!allowReimport && isDuplicateFileProblem(err.message)) {
+        // Not a dead end -- opens the confirm below instead of a toast, so
+        // "I know, I mean it" is one click away rather than a re-upload from
+        // scratch. Never fires on the retry itself (allowReimport already
+        // true), since the backend cannot return this error a second time
+        // for the same attempt.
+        setDuplicateFileMessage(err.message)
       } else {
         toast.error(err.message)
       }
@@ -715,6 +736,7 @@ export default function ImportPage() {
     setBatchPages(''); setWorkbook(null); setChosenSheets([]); setInspecting(false)
     setUploadPct(null)
     setDuplicateRows(null); setDuplicateChecked(new Set())
+    setDuplicateFileMessage(null)
   }
 
   const toggleDuplicateChecked = (id) => {
@@ -1326,7 +1348,7 @@ export default function ImportPage() {
 
             <div className="flex justify-center">
               <button
-                onClick={handleImport}
+                onClick={() => handleImport()}
                 disabled={importing || inspecting || !!pageSpecErrorText
                           || (isExcel && !!workbook && chosenSheets.length === 0)}
                 className="btn-primary"
@@ -1962,6 +1984,34 @@ export default function ImportPage() {
               ? <Spinner size="sm" tone="white" className="mr-1.5" />
               : <EyeOff className="h-4 w-4 mr-1.5" />}
             Skip {unmatchedList.length}
+          </button>
+        </div>
+      </Modal>
+
+      {/* The whole-FILE check (import_batches.file_hash) refusing a byte-
+          identical re-upload -- separate from, and earlier than, the row-
+          level review below. Confirmed with the user: re-uploading the same
+          file is allowed through to a real parse, and whichever rows in it
+          actually repeat get caught the same way an overlapping-but-
+          different statement's rows would be, by the duplicate-rows modal
+          that follows. */}
+      <Modal isOpen={!!duplicateFileMessage} onClose={() => setDuplicateFileMessage(null)}
+            title="This file was already imported" size="md">
+        <p className="text-sm text-slate-600 mb-4">{duplicateFileMessage}</p>
+        <p className="text-sm text-slate-500 mb-4">
+          Importing it again re-parses and re-stages it -- any row that
+          matches one already staged will be listed for you to keep or
+          remove right after, the same as any other overlapping statement.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setDuplicateFileMessage(null)} className="btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={() => { setDuplicateFileMessage(null); handleImport(true) }}
+            className="btn-primary"
+          >
+            Import anyway
           </button>
         </div>
       </Modal>
