@@ -8,7 +8,7 @@ import {
 import { Spinner, EmptyState, SearchableSelect, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { Download, ArrowLeft, CheckCircle2, Check, Info } from 'lucide-react'
+import { Download, ArrowLeft, CheckCircle2, Check, Info, Columns3 } from 'lucide-react'
 
 const ACCOUNT_HEAD_COLUMN = 'Account Head'
 // A Farvision Verify-only column, not one of farvision.py's COLUMNS -- never
@@ -17,6 +17,24 @@ const ACCOUNT_HEAD_COLUMN = 'Account Head'
 // the server's own column list.
 const TDS_RATE_COLUMN = 'TDS Rate'
 const TDS_RATE_PRESETS = ['1%', '2%', '10%']
+
+// Every one of these is a real money figure in farvision.py's own COLUMNS
+// (Debit/Credit/Bill/Balance/Adjustment Amount) -- matched by the "Amount"
+// suffix rather than a fixed list, so a column this company's export gains
+// later still gets Indian-format, right-aligned rendering without this file
+// needing to know its exact name in advance.
+const isAmountColumn = (col) => col.endsWith('Amount')
+
+// Indian digit grouping (1,23,456.00), two decimals always -- confirmed with
+// the user. Blank/non-numeric values fall through to showValue's own dash/
+// as-is handling untouched, since this only ever runs on a column already
+// known to be an amount column.
+const showAmount = (v) => {
+  if (v === null || v === undefined || v === '') return '—'
+  const n = Number(v)
+  if (Number.isNaN(n)) return String(v)
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 // Dates arrive ISO, numbers as numbers, everything else as the bank wrote
 // it. Only null/undefined become a dash -- 0 is a value the row actually has.
@@ -117,6 +135,13 @@ export default function FarvisionVerifyPage() {
     document_type: '',
   })
 
+  // Which columns are hidden from the table -- plain component state, not
+  // persisted anywhere on purpose (confirmed with the user): leaving this
+  // page and coming back starts with every column showing again, the same
+  // as every other filter/toggle this page already resets on reload.
+  const [hiddenColumns, setHiddenColumns] = useState(() => new Set())
+  const [columnPickerOpen, setColumnPickerOpen] = useState(false)
+
   // Strips blank values so an unset filter never overrides a nav-state one
   // with an empty string.
   const activeFilterParams = (f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v))
@@ -181,6 +206,21 @@ export default function FarvisionVerifyPage() {
   const displayColumns = columns.flatMap((col) => (
     col === 'Description' ? [col, TDS_RATE_COLUMN] : [col]
   ))
+
+  // What the table actually renders -- the column picker only ever hides a
+  // column from THIS screen, never from what gets exported (displayColumns/
+  // columns, unaffected, are still what handleFinalExport and the server
+  // agree on).
+  const visibleColumns = displayColumns.filter((col) => !hiddenColumns.has(col))
+
+  const toggleColumnVisible = (col) => {
+    setHiddenColumns((prev) => {
+      const next = new Set(prev)
+      if (next.has(col)) next.delete(col)
+      else next.add(col)
+      return next
+    })
+  }
 
   const optionsFor = (row) => {
     if (Array.isArray(row.options)) return row.options
@@ -477,6 +517,47 @@ export default function FarvisionVerifyPage() {
             Clear filters
           </button>
         )}
+
+        {/* Which columns render on THIS screen -- never what gets exported;
+            see visibleColumns/displayColumns above. ml-auto keeps it at the
+            far end of the filter row regardless of how many date/type
+            filters are showing beside it. Resets every time this page is
+            left and reopened -- confirmed with the user, no persistence. */}
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            onClick={() => setColumnPickerOpen((v) => !v)}
+            className="btn-secondary py-1 text-xs"
+          >
+            <Columns3 className="h-3.5 w-3.5 mr-1.5" />
+            Columns{hiddenColumns.size > 0 ? ` (${hiddenColumns.size} hidden)` : ''}
+          </button>
+          {columnPickerOpen && (
+            <div className="absolute right-0 z-10 mt-1 w-64 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+              {displayColumns.map((col) => (
+                <label
+                  key={col}
+                  className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hiddenColumns.has(col)}
+                    onChange={() => toggleColumnVisible(col)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="truncate">{col}</span>
+                </label>
+              ))}
+              <button
+                type="button"
+                onClick={() => setColumnPickerOpen(false)}
+                className="mt-1 w-full rounded px-2 py-1.5 text-center text-xs text-primary-600 hover:bg-slate-50"
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {!loading && rows.length > 0 && (
@@ -523,10 +604,10 @@ export default function FarvisionVerifyPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase">
-                  {displayColumns.map((col) => (
+                  {visibleColumns.map((col) => (
                     <th
                       key={col}
-                      className={`px-4 py-3 whitespace-nowrap ${col === ACCOUNT_HEAD_COLUMN ? 'min-w-[22rem]' : ''}`}
+                      className={`px-4 py-3 whitespace-nowrap ${col === ACCOUNT_HEAD_COLUMN ? 'min-w-[22rem]' : ''} ${isAmountColumn(col) ? 'text-right' : ''}`}
                     >
                       {col}
                     </th>
@@ -534,15 +615,23 @@ export default function FarvisionVerifyPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((row) => {
+                {rows.map((row, rowIndex) => {
                   const state = rowState[row.id]
                   const isSkipped = skipped.has(row.id)
                   const isOverriding = overriding.has(row.id)
                   const showDropdown = !row.matched || isOverriding
+                  // Hard red always wins, skipped or not -- confirmed with
+                  // the user: skipping only hides the dropdown for now, it
+                  // does not mean the row stopped needing a decision. Every
+                  // other row alternates white/grey by its position on the
+                  // page, independent of match state.
+                  const rowBg = !row.matched
+                    ? 'bg-red-200'
+                    : rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'
 
                   return (
-                    <tr key={row.id} className={!row.matched && !isSkipped ? 'bg-amber-50' : ''}>
-                      {displayColumns.map((col) => {
+                    <tr key={row.id} className={rowBg}>
+                      {visibleColumns.map((col) => {
                         if (col === TDS_RATE_COLUMN) {
                           const tState = tdsRateState[row.id]
                           return (
@@ -646,6 +735,13 @@ export default function FarvisionVerifyPage() {
                                   )}
                                 </div>
                               )}
+                            </td>
+                          )
+                        }
+                        if (isAmountColumn(col)) {
+                          return (
+                            <td key={col} className="px-4 py-3 align-top text-right text-slate-700 tabular-nums">
+                              {showAmount(row[col])}
                             </td>
                           )
                         }
