@@ -12,7 +12,7 @@ import {
 import { PageHeader } from '../components/PageHeader.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
-import { RefreshCw, Trash2, ArrowRight } from 'lucide-react'
+import { RefreshCw, Trash2, Undo2 } from 'lucide-react'
 
 // Which column types are printed right-aligned with thousands separators. Taken
 // from the column's declared type rather than its name, so a company that calls
@@ -319,7 +319,7 @@ export default function LedgerPage() {
                           title="Send back to Imported Rows"
                           className="rounded p-1.5 text-blue-500 hover:bg-blue-50 hover:text-blue-700"
                         >
-                          <ArrowRight className="h-4 w-4" />
+                          <Undo2 className="h-4 w-4" />
                         </button>
                       </td>
                     )}
