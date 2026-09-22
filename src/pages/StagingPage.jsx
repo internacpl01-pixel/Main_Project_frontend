@@ -963,7 +963,18 @@ export default function StagingPage() {
                 <SkeletonRows cols={columns.length ? columns.length + 1 : 6} />
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 1} className="text-center">
+                  <td colSpan={columns.length + 1}>
+                    {/* sticky left-0, not just text-center: this cell spans
+                        every column, which on a wide table (a dozen-plus
+                        statement columns) is many screens wide, and text-
+                        align alone still left the message wherever the
+                        scroll container happened to default its scroll
+                        position -- observed in production sitting fully off
+                        to the right, invisible without scrolling. Sticky
+                        pins it to the LEFT EDGE OF WHATEVER IS CURRENTLY
+                        VISIBLE in the overflow-x-auto wrapper, so it shows
+                        up immediately regardless of scroll position. */}
+                    <div className="sticky left-0 w-[calc(100vw-18rem)] max-w-3xl">
                     {/* An empty table has three different causes and they need
                         three different next steps — nothing imported, a search
                         that matched nothing, or a filter left on from earlier.
@@ -1002,6 +1013,7 @@ export default function StagingPage() {
                         ) : undefined
                       }
                     />
+                    </div>
                   </td>
                 </tr>
               ) : (
