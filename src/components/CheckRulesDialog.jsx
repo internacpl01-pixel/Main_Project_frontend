@@ -228,7 +228,10 @@ export default function CheckRulesDialog({
       }, {})
   )
 
-  const conflicts = (result?.rows || []).filter((r) => r.status === 'conflict')
+  // Every row the check judged, in the order it judged them — what the table
+  // actually draws now, green/red/grey by status.
+  const allRows = result?.rows || []
+  const conflicts = allRows.filter((r) => r.status === 'conflict')
   // Rows the bulk button still has work to do on: unlocked, and not already
   // written by hand. A row saved from its own dropdown is done, and counting it
   // again would have the button offer to redo a decision already made.
@@ -332,8 +335,14 @@ export default function CheckRulesDialog({
 
       const defaults = {}
       data.rows.forEach((r) => {
-        if (r.status !== 'conflict') return
-        defaults[r.id] = allowedFor(data, r)[0]?.id
+        if (r.status === 'conflict') {
+          defaults[r.id] = allowedFor(data, r)[0]?.id
+        } else if (r.status === 'ok') {
+          // Already right, so the dropdown (when there is one) opens on what
+          // is actually there rather than the rule's first choice — changing
+          // it is opting into a different valid head, not "fixing" anything.
+          defaults[r.id] = r.current_id
+        }
       })
       setChoices(defaults)
       setRowState({})
@@ -595,24 +604,32 @@ export default function CheckRulesDialog({
               )}
             </div>
 
-            {result.summary.conflicts === 0 ? (
-              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                All {result.summary.total}{' '}
-                {result.summary.total === 1 ? 'row follows' : 'rows follow'} the
-                rule on {result.account.label}.
-                {result.summary.no_direction > 0 &&
-                  ` ${result.summary.no_direction} without a CR/DR marker could not be judged.`}
-              </div>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-red-600">
-                    {result.summary.conflicts} of {result.summary.total} rows break
-                    the rule
-                    {result.summary.locked_conflicts > 0 &&
-                      ` (${result.summary.locked_conflicts} locked — unlock to fix)`}
-                    .
-                  </p>
+            <>
+              {/* Every row is drawn now, not just conflicts — ok in green,
+                  conflict in red — so this is a status line above the table
+                  rather than a substitute for it. */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className={`text-sm font-medium ${
+                  result.summary.conflicts > 0 ? 'text-red-600' : 'text-green-700'
+                }`}>
+                  {result.summary.conflicts > 0 ? (
+                    <>
+                      {result.summary.conflicts} of {result.summary.total} rows break
+                      the rule
+                      {result.summary.locked_conflicts > 0 &&
+                        ` (${result.summary.locked_conflicts} locked — unlock to fix)`}
+                      .
+                    </>
+                  ) : (
+                    <>
+                      All {result.summary.total}{' '}
+                      {result.summary.total === 1 ? 'row follows' : 'rows follow'} the
+                      rule on {result.account.label}.
+                    </>
+                  )}
+                  {result.summary.no_direction > 0 &&
+                    ` ${result.summary.no_direction} without a CR/DR marker could not be judged.`}
+                </p>
 
                   {/* Which statement columns to show beside each row. Date and
                       amount alone cannot tell two transfers on the same day
@@ -680,8 +697,8 @@ export default function CheckRulesDialog({
                         <th className="px-3 py-2">Replace with</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-red-100">
-                      {conflicts.map((r) => {
+                    <tbody className="divide-y divide-slate-100">
+                      {allRows.map((r) => {
                         const allowed = allowedFor(result, r)
                         const state = rowState[r.id]
                         const cond = r.rule_id != null
@@ -697,10 +714,12 @@ export default function CheckRulesDialog({
                           .map((id) => result.conditions?.[String(id)]?.sentence)
                           .filter(Boolean)
                         return (
-                          // Green once written: the row is no longer a finding,
-                          // it is a thing that has been dealt with, and leaving
-                          // it red would have the list keep accusing rows the
-                          // user has already fixed.
+                          // Green once written or once already matching: a
+                          // fixed conflict and a row that never broke the rule
+                          // read the same way, since both are "nothing left to
+                          // do here". Red is only for a finding still open, and
+                          // grey is the one status the rule cannot speak to at
+                          // all — no CR/DR marker, so there is nothing to judge.
                           <tr
                             key={r.id}
                             className={
@@ -708,7 +727,11 @@ export default function CheckRulesDialog({
                                 ? 'bg-green-50'
                                 : state?.status === 'skipped'
                                   ? 'bg-slate-50 opacity-70'
-                                  : `bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`
+                                  : r.status === 'ok'
+                                    ? 'bg-green-50'
+                                    : r.status === 'no_direction'
+                                      ? 'bg-slate-50'
+                                      : `bg-red-50 ${r.is_locked ? 'opacity-60' : ''}`
                             }
                           >
                             <td className="px-3 py-2 whitespace-nowrap">{r.txn_date || '—'}</td>
@@ -733,12 +756,18 @@ export default function CheckRulesDialog({
                                 </div>
                               </td>
                             ))}
-                            <td className="px-3 py-2 text-red-700">
+                            <td className={`px-3 py-2 ${
+                              r.status === 'ok' ? 'text-green-700'
+                                : r.status === 'no_direction' ? 'text-slate-400'
+                                : 'text-red-700'
+                            }`}>
                               {r.current_name || <span className="italic">not set</span>}
                               {/* Which sentence judged this row. Only shown when
                                   a condition did — "the grid" is the default and
-                                  saying so on every row would be noise. */}
-                              {cond && extraSentences.length > 0 && allowed.length > 1 ? (
+                                  saying so on every row would be noise. Neither
+                                  applies to a no_direction row: nothing judged
+                                  it, so there is no sentence to point at. */}
+                              {r.status === 'no_direction' ? null : cond && extraSentences.length > 0 && allowed.length > 1 ? (
                                 <span
                                   className="ml-1 rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700"
                                   title={
@@ -767,7 +796,50 @@ export default function CheckRulesDialog({
                               )}
                             </td>
                             <td className="px-3 py-2">
-                              {r.is_locked ? (
+                              {r.status === 'no_direction' ? (
+                                <span className="text-xs italic text-slate-400">
+                                  no CR/DR marker — cannot be judged
+                                </span>
+                              ) : r.status === 'ok' ? (
+                                // Same controls a conflict gets — a dropdown
+                                // when more than one head is legitimately
+                                // right, Save/error/spinner states identical to
+                                // theirs — plus the one thing that differs: a
+                                // fixed "this already matches" label, since
+                                // there is nothing to fix, only (optionally)
+                                // to change.
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
+                                    <Check className="h-3.5 w-3.5 mr-0.5" /> Matches rule
+                                  </span>
+                                  {allowed.length > 1 && (
+                                    <select
+                                      className="input py-1 text-xs"
+                                      value={choices[r.id] ?? ''}
+                                      disabled={state?.status === 'saving'}
+                                      onChange={(e) => handlePick(r, e.target.value)}
+                                    >
+                                      {allowed.map((h) => (
+                                        <option key={h.id} value={h.id}>{h.name}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  {state?.status === 'saving' && <Spinner size="sm" />}
+                                  {state?.status === 'saved' && (
+                                    <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
+                                      <Check className="h-3.5 w-3.5 mr-0.5" /> saved
+                                    </span>
+                                  )}
+                                  {state?.status === 'error' && (
+                                    <span
+                                      className="shrink-0 text-xs font-medium text-red-700"
+                                      title={state.message}
+                                    >
+                                      not saved
+                                    </span>
+                                  )}
+                                </div>
+                              ) : r.is_locked ? (
                                 <span className="inline-flex items-center text-xs text-slate-500">
                                   <Lock className="h-3 w-3 mr-1" /> locked — skipped
                                 </span>
@@ -896,15 +968,14 @@ export default function CheckRulesDialog({
 
                 <p className="text-xs text-slate-500">
                   {result.summary.ok} {result.summary.ok === 1 ? 'row' : 'rows'}{' '}
-                  already follow the rule
+                  already follow the rule, shown green above
                   {result.summary.no_direction > 0 &&
-                    `, ${result.summary.no_direction} without a CR/DR marker skipped`}
+                    `, ${result.summary.no_direction} without a CR/DR marker shown grey`}
                   {saved > 0 &&
                     `. ${saved} ${saved === 1 ? 'row' : 'rows'} saved from the dropdowns above`}
                   .
                 </p>
-              </>
-            )}
+            </>
 
             {/* Only when there is something to press. With nothing to replace
                 — every row already following the rule, or every one saved from
