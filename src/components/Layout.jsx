@@ -11,6 +11,7 @@ import ChangePasswordDialog from './ChangePasswordDialog.jsx'
 import { BusyDot } from './GlobalProgress.jsx'
 import SuperAdminHome from '../pages/SuperAdminHome.jsx'
 import { GreetingTicker } from './GreetingTicker.jsx'
+import ErrorBoundary from './ErrorBoundary.jsx'
 
 // Every route in App.jsx has an entry here. Projects and Master Data were
 // previously reachable only through links buried on the dashboard, which meant
@@ -291,7 +292,13 @@ export default function Layout() {
             useEffect on mount, so this is what reloads them with the new token. */}
         <main className="p-4 lg:p-6">
           {hasCompany || !needsCompany ? (
-            <Outlet key={user.schema} />
+            // resetKey includes the path, not just the schema: the schema key
+            // already remounts the route on a company switch, but a crash
+            // needs clearing the moment navigation LEAVES the page that threw,
+            // not just when the company changes underneath it.
+            <ErrorBoundary resetKey={`${user.schema}:${location.pathname}`}>
+              <Outlet key={user.schema} />
+            </ErrorBoundary>
           ) : isSuperAdmin ? (
             // Belonging to no company is this role's design, not a fault, so it
             // gets a console rather than the notice below — which was written

@@ -518,7 +518,17 @@ export function SearchableSelect({
         const sameLetter = []
         const seen = new Set()
         for (const o of (searchPool || options)) {
-          if (seen.has(o)) continue
+          // A candidate list this pulls in from elsewhere (an Account Head
+          // master row with a blank name, say) is not guaranteed to be all
+          // strings, and o.toLowerCase() on anything else throws mid-render --
+          // not caught by any promise .catch() nearby, so it used to take the
+          // whole page down to blank the moment someone typed a search letter.
+          // Skipping a non-string entry here is silent on purpose: it is the
+          // same "print exactly what came back, invent nothing" rule
+          // showValue/showAmount already follow elsewhere on this page, just
+          // applied to "leave it out" instead of "show a dash" because there
+          // is no cell to put a dash in here.
+          if (typeof o !== 'string' || seen.has(o)) continue
           const lower = o.toLowerCase()
           let bucket = null
           if (lower === q) bucket = exact

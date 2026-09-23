@@ -225,7 +225,8 @@ export default function FarvisionVerifyPage() {
   const optionsFor = (row) => {
     if (Array.isArray(row.options)) return row.options
     if (row.internal) return candidates.bank_names
-    return candidates.account_heads[row.company] || []
+    const forCompany = candidates.account_heads[row.company]
+    return Array.isArray(forCompany) ? forCompany : []
   }
 
   // The full pool a row could ever match against -- always the whole
@@ -236,7 +237,11 @@ export default function FarvisionVerifyPage() {
   // only offered a few candidates -- confirmed with the user as the actual
   // problem: the suggestions are fine, but typing was stuck searching only
   // that short list instead of the master itself.
-  const fullPoolFor = (row) => (row.internal ? candidates.bank_names : candidates.account_heads[row.company] || [])
+  const fullPoolFor = (row) => {
+    if (row.internal) return candidates.bank_names
+    const forCompany = candidates.account_heads[row.company]
+    return Array.isArray(forCompany) ? forCompany : []
+  }
 
   const handleResolve = async (row, accountHead) => {
     if (!accountHead) return
