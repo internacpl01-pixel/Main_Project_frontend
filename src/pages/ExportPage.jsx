@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { fetchTransactionSummary, exportTransactions } from '../api/endpoints.js'
+import { fetchTransactionSummary, fetchTransactionFilters, exportTransactions } from '../api/endpoints.js'
 import { Spinner, EmptyState } from '../components/UI.jsx'
+import { FilterBar, EMPTY_FILTERS, filterParams, activeCount } from '../components/TableFilters.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { Download } from 'lucide-react'
@@ -13,8 +14,12 @@ const FORMATS = [
 
 export default function ExportPage() {
   const [format, setFormat] = useState('csv')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  // Same Date/Account Number/Company filter bar the Ledger page uses, reading
+  // the same GET /transactions/filters options -- an account or company
+  // chosen here means exactly what it means there, since both are matched by
+  // the same digits-only/case-insensitive rules server-side.
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [filterOptions, setFilterOptions] = useState(null)
   const [exporting, setExporting] = useState(false)
   const [summary, setSummary] = useState([])
   const [loading, setLoading] = useState(true)
@@ -24,14 +29,15 @@ export default function ExportPage() {
       .then((d) => setSummary(d))
       .catch((err) => toast.error(err.message))
       .finally(() => setLoading(false))
+    fetchTransactionFilters()
+      .then((d) => setFilterOptions(d))
+      .catch((err) => toast.error(err.message))
   }, [])
 
   const handleExport = async () => {
     setExporting(true)
     try {
-      const params = {}
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo) params.date_to = dateTo
+      const params = filterParams(filters)
       const blob = await exportTransactions(format, params)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -71,15 +77,19 @@ export default function ExportPage() {
                   {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Date From</label>
-                  <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input" />
-                </div>
-                <div>
-                  <label className="label">Date To</label>
-                  <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input" />
-                </div>
+              <div>
+                <label className="label">Filter</label>
+                <FilterBar
+                  options={filterOptions}
+                  value={filters}
+                  onChange={setFilters}
+                  loading={!filterOptions}
+                />
+                {activeCount(filters) === 0 && (
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    No filters set — every transaction you can see will be exported.
+                  </p>
+                )}
               </div>
               <button
                 onClick={handleExport}
