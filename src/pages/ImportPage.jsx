@@ -4,7 +4,7 @@ import {
   importPdf, importExcel, importCsv, inspectExcel, fetchMasterData,
   pollImportJob, startDriveImportJob, retryDriveFileWithPassword,
   getDriveFolderSettings, listDriveFiles, skipDriveFile, skipDriveFiles,
-  fetchDriveLinkFile, verifyDriveLinkFile, cancelImportJob, deleteTempRow,
+  fetchDriveLinkFile, verifyDriveLinkFile, cancelImportJob, deleteTempRowsBatch,
 } from '../api/endpoints.js'
 import { PasswordInput, Spinner, Modal } from '../components/UI.jsx'
 import ImportProgressOverlay from '../components/ImportProgressOverlay.jsx'
@@ -748,21 +748,25 @@ export default function ImportPage() {
     })
   }
 
-  // Deletes every still-checked duplicate via the same per-row delete
-  // endpoint the Imported Rows page itself uses -- these rows were just
-  // staged by this same import, so none of them can be locked or already
-  // posted, the only two things that endpoint ever refuses.
+  // One request, not one per row -- see deleteTempRowsBatch. The original
+  // Promise.all-per-id version crashed the backend on a statement with a
+  // couple hundred overlapping rows, the same concurrent-request failure
+  // the Drive "Skip 71" bug had.
   const handleRemoveDuplicates = async () => {
     const ids = [...duplicateChecked]
     if (ids.length === 0) { setDuplicateRows(null); return }
     setRemovingDuplicates(true)
     try {
-      await Promise.all(ids.map((id) => deleteTempRow(id)))
-      toast.success(`Removed ${ids.length} duplicate ${ids.length === 1 ? 'row' : 'rows'}`)
+      const res = await deleteTempRowsBatch(ids)
+      const skipped = (res.skipped_locked?.length || 0) + (res.skipped_posted?.length || 0)
+      toast.success(
+        `Removed ${res.deleted.length} duplicate ${res.deleted.length === 1 ? 'row' : 'rows'}` +
+        (skipped ? ` — ${skipped} couldn't be removed (locked or already posted)` : '')
+      )
       setDuplicateRows(null)
       setDuplicateChecked(new Set())
     } catch (err) {
-      toast.error(err.message || 'Could not remove all of the checked rows')
+      toast.error(err.message || 'Could not remove the checked rows')
     } finally {
       setRemovingDuplicates(false)
     }

@@ -398,6 +398,19 @@ export async function deleteTempRow(rowId) {
   return data
 }
 
+// Same outcome as calling deleteTempRow once per id, but as ONE request --
+// built after Promise.all-ing deleteTempRow per id (the duplicate-rows
+// review's original "Remove checked" button) crashed the backend on ~250
+// rows, the same concurrent-request failure the Drive "Skip 71" bug had.
+// Returns {deleted, skipped_locked, skipped_posted, not_found} -- ids, not
+// counts, so a caller can say exactly which ones didn't go through.
+export async function deleteTempRowsBatch(ids) {
+  const form = new FormData()
+  form.append('ids', ids.join(','))
+  const { data } = await api.post('/transactions/temp-trans/delete-batch', form)
+  return data
+}
+
 export async function clearTempTrans() {
   // Removes every staged row and its batch. Refused with 409 if any staged row
   // has already been posted to the ledger.
