@@ -619,7 +619,7 @@ export default function FarvisionVerifyPage() {
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
-            icon={CheckCircle2}
+            icon={<CheckCircle2 className="h-10 w-10" />}
             title="Nothing to export"
             description="This filter has no staged rows."
           />
