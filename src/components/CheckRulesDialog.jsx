@@ -44,6 +44,19 @@ const accountDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^0+/, '
 const allowedFor = (result, row) =>
   row.heads || result.expected[row.direction] || []
 
+// A row the server judged "ok" is not necessarily a clean match: more than
+// one condition can share a keyword (a company's own name shows up in nearly
+// every narration) and both come out true for the same row, each possibly
+// naming a different head. resolve() unions their heads into `allowed` so the
+// row still has a legitimate current value, but which condition actually
+// applies is unresolved — that is not the same fact as "this row is
+// definitely right", and showing it identically to one is how a row nobody
+// has actually checked ends up mistaken for one that has. `ambiguous` is
+// server-computed (see _judged_rows) so the dialog and the staging table's
+// flagged-rows filter cannot disagree about which rows this means; on a
+// conflict row it changes nothing here since conflicts are already red.
+const isAmbiguousRow = (row) => row.status === 'ok' && !!row.ambiguous
+
 // Which statement columns to show beside each conflict, remembered.
 //
 // Per schema, because two companies on the same browser have different columns
@@ -232,6 +245,12 @@ export default function CheckRulesDialog({
   // actually draws now, green/red/grey by status.
   const allRows = result?.rows || []
   const conflicts = allRows.filter((r) => r.status === 'conflict')
+  // "ok" rows that are actually ambiguous — kept out of summary.ok server-side
+  // already (see check_temp_rules), pulled out here too for the rows that
+  // need the red treatment in the table below.
+  const ambiguousRows = allRows.filter(isAmbiguousRow)
+  const cleanOk = result?.summary.ok || 0
+  const needsAttention = (result?.summary.conflicts || 0) + (result?.summary.ambiguous || 0)
   // Rows the bulk button still has work to do on: unlocked, and not already
   // written by hand. A row saved from its own dropdown is done, and counting it
   // again would have the button offer to redo a decision already made.
@@ -356,7 +375,9 @@ export default function CheckRulesDialog({
       // server re-judges, so the list cannot outlive the findings it is built
       // from — a row fixed since this check drops out on its own.
       onChecked?.(
-        new Set(data.rows.filter((r) => r.status === 'conflict').map((r) => r.id)),
+        new Set(data.rows
+          .filter((r) => r.status === 'conflict' || isAmbiguousRow(r))
+          .map((r) => r.id)),
         data.target.field,
         { account_type: type, account_number: account,
           target: data.target.target, label: data.account.label },
@@ -610,12 +631,15 @@ export default function CheckRulesDialog({
                   rather than a substitute for it. */}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className={`text-sm font-medium ${
-                  result.summary.conflicts > 0 ? 'text-red-600' : 'text-green-700'
+                  needsAttention > 0 ? 'text-red-600' : 'text-green-700'
                 }`}>
-                  {result.summary.conflicts > 0 ? (
+                  {needsAttention > 0 ? (
                     <>
                       {result.summary.conflicts} of {result.summary.total} rows break
                       the rule
+                      {ambiguousRows.length > 0 &&
+                        ` (${ambiguousRows.length} more ambiguous — more than one ` +
+                        `condition matched and it is not clear which should have)`}
                       {result.summary.locked_conflicts > 0 &&
                         ` (${result.summary.locked_conflicts} locked — unlock to fix)`}
                       .
@@ -713,11 +737,18 @@ export default function CheckRulesDialog({
                         const extraSentences = extraIds
                           .map((id) => result.conditions?.[String(id)]?.sentence)
                           .filter(Boolean)
+                        // A row the server called "ok" but that more than one
+                        // condition could have decided is not a clean pass —
+                        // see isAmbiguousRow's own note. Treated as red here,
+                        // the same as an outright conflict, even though its
+                        // status is still 'ok' as far as judge() is concerned.
+                        const ambiguous = isAmbiguousRow(r)
                         return (
-                          // Green once written or once already matching: a
-                          // fixed conflict and a row that never broke the rule
+                          // Green once written or once already matching cleanly:
+                          // a fixed conflict and a row that never broke the rule
                           // read the same way, since both are "nothing left to
-                          // do here". Red is only for a finding still open, and
+                          // do here". Red is a finding still open OR one the
+                          // rule could not pin down to a single condition, and
                           // grey is the one status the rule cannot speak to at
                           // all — no CR/DR marker, so there is nothing to judge.
                           <tr
@@ -727,7 +758,7 @@ export default function CheckRulesDialog({
                                 ? 'bg-green-50'
                                 : state?.status === 'skipped'
                                   ? 'bg-slate-50 opacity-70'
-                                  : r.status === 'ok'
+                                  : r.status === 'ok' && !ambiguous
                                     ? 'bg-green-50'
                                     : r.status === 'no_direction'
                                       ? 'bg-slate-50'
@@ -757,7 +788,7 @@ export default function CheckRulesDialog({
                               </td>
                             ))}
                             <td className={`px-3 py-2 ${
-                              r.status === 'ok' ? 'text-green-700'
+                              r.status === 'ok' && !ambiguous ? 'text-green-700'
                                 : r.status === 'no_direction' ? 'text-slate-400'
                                 : 'text-red-700'
                             }`}>
@@ -800,7 +831,7 @@ export default function CheckRulesDialog({
                                 <span className="text-xs italic text-slate-400">
                                   no CR/DR marker — cannot be judged
                                 </span>
-                              ) : r.status === 'ok' ? (
+                              ) : r.status === 'ok' && !ambiguous ? (
                                 // Nothing to fix, so no red-conflict machinery
                                 // (skip, "why", locked notice) — just a plain
                                 // dropdown, preselected to what is already
@@ -961,8 +992,11 @@ export default function CheckRulesDialog({
                 </div>
 
                 <p className="text-xs text-slate-500">
-                  {result.summary.ok} {result.summary.ok === 1 ? 'row' : 'rows'}{' '}
+                  {cleanOk} {cleanOk === 1 ? 'row' : 'rows'}{' '}
                   already follow the rule, shown green above
+                  {ambiguousRows.length > 0 &&
+                    `, ${ambiguousRows.length} more ${ambiguousRows.length === 1 ? 'is' : 'are'} ` +
+                    `ambiguous (more than one condition matched) and shown red for review`}
                   {result.summary.no_direction > 0 &&
                     `, ${result.summary.no_direction} without a CR/DR marker shown grey`}
                   {saved > 0 &&
