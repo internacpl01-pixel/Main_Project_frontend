@@ -801,29 +801,23 @@ export default function CheckRulesDialog({
                                   no CR/DR marker — cannot be judged
                                 </span>
                               ) : r.status === 'ok' ? (
-                                // Same controls a conflict gets — a dropdown
-                                // when more than one head is legitimately
-                                // right, Save/error/spinner states identical to
-                                // theirs — plus the one thing that differs: a
-                                // fixed "this already matches" label, since
-                                // there is nothing to fix, only (optionally)
-                                // to change.
+                                // Nothing to fix, so no red-conflict machinery
+                                // (skip, "why", locked notice) — just a plain
+                                // dropdown, preselected to what is already
+                                // there, for the one case that is still worth
+                                // acting on: swapping a correct-but-not-preferred
+                                // head for another one the rule also allows.
                                 <div className="flex items-center gap-2">
-                                  <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
-                                    <Check className="h-3.5 w-3.5 mr-0.5" /> Matches rule
-                                  </span>
-                                  {allowed.length > 1 && (
-                                    <select
-                                      className="input py-1 text-xs"
-                                      value={choices[r.id] ?? ''}
-                                      disabled={state?.status === 'saving'}
-                                      onChange={(e) => handlePick(r, e.target.value)}
-                                    >
-                                      {allowed.map((h) => (
-                                        <option key={h.id} value={h.id}>{h.name}</option>
-                                      ))}
-                                    </select>
-                                  )}
+                                  <select
+                                    className="input py-1 text-xs"
+                                    value={choices[r.id] ?? ''}
+                                    disabled={state?.status === 'saving'}
+                                    onChange={(e) => handlePick(r, e.target.value)}
+                                  >
+                                    {allowed.map((h) => (
+                                      <option key={h.id} value={h.id}>{h.name}</option>
+                                    ))}
+                                  </select>
                                   {state?.status === 'saving' && <Spinner size="sm" />}
                                   {state?.status === 'saved' && (
                                     <span className="inline-flex shrink-0 items-center text-xs font-medium text-green-700">
