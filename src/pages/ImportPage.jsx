@@ -1245,11 +1245,31 @@ export default function ImportPage() {
 
             {/* --- Which sheets to import -------------------------------- */}
             {isExcel && inspecting && (
-              <div className="mb-5 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-                <Spinner size="sm" />
-                {uploadPct !== null
-                  ? `Uploading the workbook... ${uploadPct}%`
-                  : "Reading the workbook's sheets..."}
+              <div className="mb-5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <Spinner size="sm" />
+                  {uploadPct !== null
+                    ? `Uploading the workbook... ${uploadPct}%`
+                    : "Reading the workbook's sheets..."}
+                  {uploadPct !== null && (
+                    <span className="ml-auto text-xs font-semibold tabular-nums text-slate-500">
+                      {uploadPct}%
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-slate-200">
+                  {uploadPct !== null ? (
+                    <div
+                      className="h-full rounded-full bg-primary-500 transition-all duration-300 ease-out"
+                      style={{ width: `${uploadPct}%` }}
+                    />
+                  ) : (
+                    /* No real percentage while the server parses the workbook --
+                       a sweeping line says "still going" without inventing a
+                       number that isn't there. */
+                    <div className="h-full w-1/3 rounded-full bg-primary-500 animate-indeterminate-sweep" />
+                  )}
+                </div>
               </div>
             )}
 

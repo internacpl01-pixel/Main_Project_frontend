@@ -62,6 +62,17 @@
   }
 }
 
+/* A bar with no real percentage to report (e.g. the server is still reading
+   a file and hasn't said how far through it is) -- a line sweeps left to
+   right so the wait still reads as "in progress", not frozen. */
+@keyframes indeterminate-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.animate-indeterminate-sweep {
+  animation: indeterminate-sweep 1.2s ease-in-out infinite;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

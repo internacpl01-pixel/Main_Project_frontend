@@ -124,12 +124,7 @@ export default function LedgerPage() {
     setClearing(true)
     try {
       const r = await deleteAllTransactions()
-      toast.success(
-        `${r.deleted} posted rows removed` +
-        (r.rows_postable_again
-          ? `, ${r.rows_postable_again} back in Imported Rows to post again`
-          : '')
-      )
+      toast.success(`${r.deleted} posted rows permanently deleted`)
       // Closed on success rather than on click: the dialog is what shows the
       // delete running, and it is also what stops a second one being sent.
       setClearOpen(false)
@@ -347,12 +342,12 @@ export default function LedgerPage() {
         danger
         title={`Delete all ${total} posted transactions?`}
         message={
-          'This empties the ledger. The rows are not lost: each one stays in ' +
-          'Imported Rows with its classification, and can be posted again — ' +
-          'posting is what this undoes. Export first if you need a record of ' +
-          'the ledger as it stands.'
+          "This step can't be undone — you will lose this data. Every one of " +
+          'these rows is removed permanently, from the ledger and from ' +
+          'Imported Rows both; none of them can be posted again. Export first ' +
+          'if you need a record of the ledger as it stands.'
         }
-        confirmText={clearing ? 'Deleting...' : 'Delete all'}
+        confirmText={clearing ? 'Deleting...' : 'Yes, delete all'}
         busy={clearing}
       />
 
