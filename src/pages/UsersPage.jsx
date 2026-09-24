@@ -34,7 +34,7 @@ const ROLE_BADGES = {
 // level rather than the signed-in user's.
 const hasLevelValue = (level, required) => level <= required
 
-const emptyForm = { username: '', password: '', role: 'staff' }
+const emptyForm = { username: '', password: '', role: 'staff', email: '' }
 
 export default function UsersPage({ embedded = false, onCount }) {
   const { user, level, hasLevel } = useAuth()
@@ -44,7 +44,7 @@ export default function UsersPage({ embedded = false, onCount }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [editing, setEditing] = useState(null)
-  const [editForm, setEditForm] = useState({ username: '', password: '' })
+  const [editForm, setEditForm] = useState({ username: '', password: '', email: '' })
   const [roleTarget, setRoleTarget] = useState(null)
   const [roleValue, setRoleValue] = useState('staff')
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -121,6 +121,7 @@ export default function UsersPage({ embedded = false, onCount }) {
         username: newUsername,
         password: form.password,
         role: form.role,
+        email: form.email.trim() || undefined,
       })
       toast.success(`${ROLE_LABELS[form.role]} '${newUsername}' created`)
       setModalOpen(false)
@@ -139,9 +140,14 @@ export default function UsersPage({ embedded = false, onCount }) {
       payload.username = editForm.username.trim()
     }
     if (editForm.password) payload.password = editForm.password
+    // '' is a real, distinct value here (see api/endpoints.js's updateUser) —
+    // it clears an email, where omitting the key leaves it alone. So this
+    // compares against what the account actually has, not against truthiness.
+    const nextEmail = editForm.email.trim()
+    if (nextEmail !== (editing.email || '')) payload.email = nextEmail
 
     if (!Object.keys(payload).length) {
-      toast.error('Change the username or set a new password first')
+      toast.error('Change the username, email, or set a new password first')
       return
     }
 
@@ -270,6 +276,7 @@ export default function UsersPage({ embedded = false, onCount }) {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/50">
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Username</th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Email</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Role</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Created</th>
                   <th className="text-right px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Actions</th>
@@ -277,10 +284,10 @@ export default function UsersPage({ embedded = false, onCount }) {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading && items.length === 0 ? (
-                  <SkeletonRows cols={4} rows={5} />
+                  <SkeletonRows cols={5} rows={5} />
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan="4">
+                    <td colSpan="5">
                       <EmptyState
                         title="No users"
                         description="This company has no accounts yet."
@@ -304,6 +311,12 @@ export default function UsersPage({ embedded = false, onCount }) {
                           {u.username}
                           {u.is_self && <span className="ml-2 text-xs font-normal text-slate-400">(you)</span>}
                         </td>
+                        <td className="px-6 py-3 text-xs text-slate-500">
+                          {/* Whether Google sign-in / OTP login are available for
+                              this account, at a glance — neither works without
+                              this being set. */}
+                          {u.email || <span className="text-slate-300">not linked</span>}
+                        </td>
                         <td className="px-6 py-3">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGES[u.role] || ROLE_BADGES.staff}`}>
                             {u.role_label}
@@ -317,7 +330,7 @@ export default function UsersPage({ embedded = false, onCount }) {
                             {actionable ? (
                               <>
                                 <button
-                                  onClick={() => { setEditing(u); setEditForm({ username: u.username, password: '' }) }}
+                                  onClick={() => { setEditing(u); setEditForm({ username: u.username, password: '', email: u.email || '' }) }}
                                   title="Edit username or password"
                                   className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-primary-600"
                                 >
@@ -426,6 +439,23 @@ export default function UsersPage({ embedded = false, onCount }) {
             </p>
           </div>
           <div>
+            <label className="label">Email <span className="font-normal text-slate-400">(optional)</span></label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleCreate() }}
+              className="input"
+              placeholder="name@company.com"
+              autoComplete="off"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Lets this account sign in with Google or an emailed one-time
+              code, instead of typing a password. Leave blank to keep it
+              password-only.
+            </p>
+          </div>
+          <div>
             <label className="label">Role</label>
             <select
               value={form.role}
@@ -470,6 +500,22 @@ export default function UsersPage({ embedded = false, onCount }) {
               onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleEdit() }}
               placeholder="Leave blank to keep the current one"
             />
+          </div>
+          <div>
+            <label className="label">Email <span className="font-normal text-slate-400">(optional)</span></label>
+            <input
+              type="email"
+              value={editForm.email}
+              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) handleEdit() }}
+              className="input"
+              placeholder="name@company.com"
+              autoComplete="off"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Lets this account sign in with Google or an emailed one-time
+              code. Clear it to turn both off and require a password again.
+            </p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setEditing(null)} className="btn-secondary text-sm">Cancel</button>

@@ -10,6 +10,30 @@ export async function login(username, password) {
   return data
 }
 
+// The ID token Google Identity Services' callback hands the page — verified
+// server-side against GOOGLE_CLIENT_ID, matched to whichever account already
+// has this email linked (see routers/auth.py's google_login). Same response
+// shape as login(): { access_token, token_type, role, level, schema }.
+export async function googleLogin(credential) {
+  const { data } = await api.post('/auth/google', { credential })
+  return data
+}
+
+// Step 1 of OTP login: email a code to whichever account has this email
+// linked. Always resolves — the backend answers the same way whether or not
+// the email matches an account, so there's nothing here for the caller to
+// branch on except a network/rate-limit error.
+export async function requestOtp(email) {
+  const { data } = await api.post('/auth/otp/request', { email })
+  return data
+}
+
+// Step 2: redeem the code for a token, same shape as login().
+export async function verifyOtp(email, code) {
+  const { data } = await api.post('/auth/otp/verify', { email, code })
+  return data
+}
+
 export async function logout() {
   await api.post('/auth/logout')
 }
@@ -98,13 +122,16 @@ export async function fetchUsers() {
 }
 
 export async function createUser(payload) {
-  // payload: { username, password, role }
+  // payload: { username, password, role, email? } — email is optional and
+  // lets that account use Google sign-in or an OTP code, in addition to its
+  // password.
   const { data } = await api.post('/users/', payload)
   return data
 }
 
 export async function updateUser(userId, payload) {
-  // payload: { username?, password? }
+  // payload: { username?, password?, email? } — email: '' clears it, distinct
+  // from omitting the key, which leaves it untouched.
   const { data } = await api.patch(`/users/${userId}`, payload)
   return data
 }

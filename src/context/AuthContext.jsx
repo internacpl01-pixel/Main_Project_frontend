@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { login, logout as apiLogout, getMe } from '../api/endpoints.js'
+import {
+  login, googleLogin, verifyOtp, logout as apiLogout, getMe,
+} from '../api/endpoints.js'
 
 const AuthContext = createContext(null)
 
@@ -105,17 +107,33 @@ export function AuthProvider({ children }) {
     init()
   }, [])
 
-  const signIn = async (username, password) => {
-    const data = await login(username, password)
+  // Shared by every sign-in path (password, Google, OTP) — each gets back the
+  // same {access_token, role, schema} shape from its own endpoint, and from
+  // here on they are indistinguishable: same storage, same identity fetch,
+  // same `user`. username comes from /auth/me rather than from whatever the
+  // caller typed, since Google/OTP sign-in never collect one directly.
+  const applyToken = async (data) => {
     localStorage.setItem('access_token', data.access_token)
     localStorage.setItem('role', data.role)
     localStorage.setItem('schema', data.schema)
-    localStorage.setItem('username', username)
-    // Fetch the full identity rather than piecing it together from the login
-    // response, so there is exactly one shape of `user` in the app.
-    applyIdentity(await loadIdentity())
+    const me = await loadIdentity()
+    localStorage.setItem('username', me.username)
+    applyIdentity(me)
     return data
   }
+
+  const signIn = async (username, password) => applyToken(await login(username, password))
+
+  // credential is the ID token Google Identity Services' callback hands the
+  // page. Throws the backend's own message when this Google account's email
+  // is not linked to any account here — routers.auth.google_login's "ask
+  // your admin" refusal, shown as-is rather than reworded.
+  const signInWithGoogle = async (credential) => applyToken(await googleLogin(credential))
+
+  // Redeems a code requestOtp() already sent (see api/endpoints.js) — the
+  // request step itself never changes auth state, so there is no
+  // signInWithOtpRequest here, only the verify half.
+  const signInWithOtp = async (email, code) => applyToken(await verifyOtp(email, code))
 
   const signOut = async () => {
     try {
@@ -143,6 +161,8 @@ export function AuthProvider({ children }) {
     user,
     loading,
     signIn,
+    signInWithGoogle,
+    signInWithOtp,
     signOut,
     level,
     hasLevel,
