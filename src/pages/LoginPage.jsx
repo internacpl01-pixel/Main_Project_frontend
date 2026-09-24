@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
-import { Lock, User, AlertCircle, Mail, KeyRound, ArrowLeft } from 'lucide-react'
+import { Lock, User, AlertCircle, Mail, ArrowLeft, MailCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Spinner, PasswordInput } from '../components/UI.jsx'
 import { requestOtp } from '../api/endpoints.js'
@@ -14,21 +14,20 @@ import { requestOtp } from '../api/endpoints.js'
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 // Which screen is showing. 'password' is where every session starts —
-// Google's button and the "sign in with a code" link both live below the
+// Google's button and the "sign in with a link" link both live below the
 // password form rather than replacing it, so nobody who has always typed a
 // password has to learn a new page just to keep doing that.
-const MODE = { PASSWORD: 'password', OTP_REQUEST: 'otp_request', OTP_VERIFY: 'otp_verify' }
+const MODE = { PASSWORD: 'password', LINK_REQUEST: 'link_request', LINK_SENT: 'link_sent' }
 
 export default function LoginPage() {
   const [mode, setMode] = useState(MODE.PASSWORD)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [resendIn, setResendIn] = useState(0)
-  const { signIn, signInWithGoogle, signInWithOtp } = useAuth()
+  const { signIn, signInWithGoogle } = useAuth()
   const navigate = useNavigate()
   const googleButtonRef = useRef(null)
 
@@ -72,9 +71,9 @@ export default function LoginPage() {
   }, [])
 
   // The resend cooldown countdown, purely cosmetic — the real limit is
-  // enforced server-side (services/otp.py's Cooldown) and this just stops
-  // someone clicking "send another" a second time before that response
-  // arrives.
+  // Supabase's own (services/supabase_auth.py surfaces its rate-limit
+  // message as-is) and this just stops someone clicking "send another"
+  // before that response arrives.
   useEffect(() => {
     if (resendIn <= 0) return undefined
     const t = setTimeout(() => setResendIn((s) => s - 1), 1000)
@@ -96,36 +95,20 @@ export default function LoginPage() {
     }
   }
 
-  const handleRequestCode = async (e) => {
-    e.preventDefault()
+  const handleSendLink = async (e) => {
+    e?.preventDefault()
     setError('')
     setLoading(true)
     try {
       await requestOtp(email)
-      toast.success('If that email has an account, a code is on its way.')
-      setMode(MODE.OTP_VERIFY)
+      setMode(MODE.LINK_SENT)
       setResendIn(60)
     } catch (err) {
       // The one case the backend is honest about — see routers/auth.py's
-      // request_otp — is a resend that came in before the cooldown expired.
-      // Everything else about whether the email matched an account stays
-      // generic, on purpose.
-      setError(err.message || 'Could not send a code')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleVerifyCode = async (e) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-    try {
-      await signInWithOtp(email, code)
-      toast.success('Welcome back!')
-      navigate('/')
-    } catch (err) {
-      setError(err.message || 'Wrong or expired code')
+      // request_otp — is a resend that came in before Supabase's own
+      // cooldown expired. Everything else about whether the email matched
+      // an account stays generic, on purpose.
+      setError(err.message || 'Could not send the link')
     } finally {
       setLoading(false)
     }
@@ -135,7 +118,6 @@ export default function LoginPage() {
     setMode(MODE.PASSWORD)
     setError('')
     setEmail('')
-    setCode('')
   }
 
   return (
@@ -209,10 +191,10 @@ export default function LoginPage() {
                 <div className="mt-4 text-center">
                   <button
                     type="button"
-                    onClick={() => { setMode(MODE.OTP_REQUEST); setError('') }}
+                    onClick={() => { setMode(MODE.LINK_REQUEST); setError('') }}
                     className="text-sm font-medium text-primary-600 hover:text-primary-700"
                   >
-                    Sign in with a code instead
+                    Sign in with an emailed link instead
                   </button>
                 </div>
 
@@ -236,11 +218,11 @@ export default function LoginPage() {
               </>
             )}
 
-            {mode === MODE.OTP_REQUEST && (
-              <form onSubmit={handleRequestCode} className="space-y-5">
+            {mode === MODE.LINK_REQUEST && (
+              <form onSubmit={handleSendLink} className="space-y-5">
                 <p className="text-sm text-slate-500">
-                  Enter the email linked to your account and we'll send a
-                  one-time code to sign in with — no password needed.
+                  Enter the email linked to your account and we'll send you a
+                  link to sign in with — no password needed.
                 </p>
                 <div>
                   <label className="label">Email</label>
@@ -261,7 +243,7 @@ export default function LoginPage() {
                 </div>
                 <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
                   {loading ? <Spinner size="sm" tone="white" className="mr-2" /> : null}
-                  {loading ? 'Sending...' : 'Send code'}
+                  {loading ? 'Sending...' : 'Send sign-in link'}
                 </button>
                 <button
                   type="button"
@@ -274,35 +256,18 @@ export default function LoginPage() {
               </form>
             )}
 
-            {mode === MODE.OTP_VERIFY && (
-              <form onSubmit={handleVerifyCode} className="space-y-5">
-                <p className="text-sm text-slate-500">
-                  Enter the 6-digit code sent to <span className="font-medium text-slate-700">{email}</span>.
-                </p>
+            {mode === MODE.LINK_SENT && (
+              <div className="space-y-5 text-center">
+                <MailCheck className="mx-auto h-10 w-10 text-primary-500" />
                 <div>
-                  <label className="label">Code</label>
-                  <div className="relative">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                      <KeyRound className="h-4 w-4 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      value={code}
-                      onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      className="input pl-9 tracking-widest"
-                      placeholder="000000"
-                      required
-                      autoFocus
-                    />
-                  </div>
+                  <p className="text-sm font-medium text-slate-800">Check your email</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    If <span className="font-medium text-slate-700">{email}</span>{' '}
+                    is linked to an account, a sign-in link has been sent to it.
+                    Open it from the same device to finish signing in.
+                  </p>
                 </div>
-                <button type="submit" disabled={loading || code.length !== 6} className="btn-primary w-full py-2.5">
-                  {loading ? <Spinner size="sm" tone="white" className="mr-2" /> : null}
-                  {loading ? 'Verifying...' : 'Verify and sign in'}
-                </button>
-                <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center justify-center gap-4 text-sm">
                   <button
                     type="button"
                     onClick={backToPassword}
@@ -314,13 +279,13 @@ export default function LoginPage() {
                   <button
                     type="button"
                     disabled={resendIn > 0 || loading}
-                    onClick={handleRequestCode}
+                    onClick={handleSendLink}
                     className="font-medium text-primary-600 hover:text-primary-700 disabled:text-slate-400 disabled:cursor-not-allowed"
                   >
-                    {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+                    {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend link'}
                   </button>
                 </div>
-              </form>
+              </div>
             )}
           </div>
         </div>

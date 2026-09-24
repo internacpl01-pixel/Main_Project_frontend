@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import {
-  login, googleLogin, verifyOtp, logout as apiLogout, getMe,
+  login, googleLogin, exchangeMagicLink, logout as apiLogout, getMe,
 } from '../api/endpoints.js'
 
 const AuthContext = createContext(null)
@@ -130,10 +130,11 @@ export function AuthProvider({ children }) {
   // your admin" refusal, shown as-is rather than reworded.
   const signInWithGoogle = async (credential) => applyToken(await googleLogin(credential))
 
-  // Redeems a code requestOtp() already sent (see api/endpoints.js) — the
-  // request step itself never changes auth state, so there is no
-  // signInWithOtpRequest here, only the verify half.
-  const signInWithOtp = async (email, code) => applyToken(await verifyOtp(email, code))
+  // accessToken is the Supabase session token MagicCallbackPage.jsx read out
+  // of the clicked link's own URL — the request step itself (requestOtp())
+  // never changes auth state, so there is no signInWithOtpRequest here, only
+  // this, the redeem half.
+  const signInWithMagicLink = async (accessToken) => applyToken(await exchangeMagicLink(accessToken))
 
   const signOut = async () => {
     try {
@@ -162,7 +163,7 @@ export function AuthProvider({ children }) {
     loading,
     signIn,
     signInWithGoogle,
-    signInWithOtp,
+    signInWithMagicLink,
     signOut,
     level,
     hasLevel,

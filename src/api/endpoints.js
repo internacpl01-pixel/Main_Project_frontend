@@ -19,18 +19,20 @@ export async function googleLogin(credential) {
   return data
 }
 
-// Step 1 of OTP login: email a code to whichever account has this email
-// linked. Always resolves — the backend answers the same way whether or not
-// the email matches an account, so there's nothing here for the caller to
-// branch on except a network/rate-limit error.
+// Step 1 of magic-link login: email a sign-in link to whichever account has
+// this email linked. Always resolves — the backend answers the same way
+// whether or not the email matches an account, so there's nothing here for
+// the caller to branch on except a network/rate-limit error.
 export async function requestOtp(email) {
   const { data } = await api.post('/auth/otp/request', { email })
   return data
 }
 
-// Step 2: redeem the code for a token, same shape as login().
-export async function verifyOtp(email, code) {
-  const { data } = await api.post('/auth/otp/verify', { email, code })
+// Step 2: MagicCallbackPage.jsx reads a Supabase session access_token out of
+// the clicked link's own URL fragment and redeems it here for a token of
+// this app's own, same shape as login().
+export async function exchangeMagicLink(accessToken) {
+  const { data } = await api.post('/auth/otp/exchange', { access_token: accessToken })
   return data
 }
 

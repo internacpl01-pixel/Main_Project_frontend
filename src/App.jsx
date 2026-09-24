@@ -3,6 +3,7 @@ import { useAuth, MANAGER, SUPER_ADMIN } from './context/AuthContext.jsx'
 import Layout from './components/Layout.jsx'
 import { Spinner } from './components/UI.jsx'
 import LoginPage from './pages/LoginPage.jsx'
+import MagicCallbackPage from './pages/MagicCallbackPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ProjectsPage from './pages/ProjectsPage.jsx'
 import CustomFieldsPage from './pages/CustomFieldsPage.jsx'
@@ -77,6 +78,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      {/* Where a clicked magic-link email lands (see backend's FRONTEND_URL
+          config and services/supabase_auth.py's redirect_to) — never guarded
+          by ProtectedRoute, since arriving here IS how someone signs in. */}
+      <Route path="/auth/callback" element={<MagicCallbackPage />} />
       <Route path="/" element={
         <ProtectedRoute>
           <Layout />
