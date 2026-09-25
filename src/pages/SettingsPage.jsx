@@ -13,7 +13,7 @@ import toast from 'react-hot-toast'
 import {
   KeyRound, LogOut, ChevronDown, Building2, Users as UsersIcon, HardDrive,
   Mail, Trash2, Check, X, Pencil, Info, Link2, CornerDownRight,
-  ShieldCheck, CheckCircle2, AlertCircle,
+  ShieldCheck, CheckCircle2, AlertCircle, Folder,
 } from 'lucide-react'
 
 // Mirrors UsersPage's own ROLE_BADGES -- kept as a small local copy rather
@@ -135,7 +135,7 @@ function SettingsRow({ icon, iconTone = 'slate', title, description, children })
  * folder affects nothing but what gets read.
  */
 function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
-                       emptyText = 'Not set' }) {
+                       emptyText = 'Not set', history = [] }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
@@ -202,26 +202,52 @@ function FolderField({ folderId, placeholder, note, onSave, onClear, clearLabel,
 
   if (!editing) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-slate-500 mb-0.5">Folder link</p>
-          {folderId ? (
-            <a
-              href={FOLDER_URL + folderId}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-primary-600 hover:underline break-all inline-flex items-start gap-1.5"
-            >
-              <Link2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span className="font-mono">{FOLDER_URL}{folderId}</span>
-            </a>
-          ) : (
-            <p className="text-sm text-slate-400">{emptyText}</p>
-          )}
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Folder link</p>
+            {folderId ? (
+              <a
+                href={FOLDER_URL + folderId}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-primary-600 hover:underline break-all inline-flex items-start gap-1.5"
+              >
+                <Link2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span className="font-mono">{FOLDER_URL}{folderId}</span>
+              </a>
+            ) : (
+              <p className="text-sm text-slate-400">{emptyText}</p>
+            )}
+          </div>
+          <button onClick={start} className="btn-secondary shrink-0">
+            <Pencil className="h-3.5 w-3.5 mr-1.5" />Change
+          </button>
         </div>
-        <button onClick={start} className="btn-secondary shrink-0">
-          <Pencil className="h-3.5 w-3.5 mr-1.5" />Change
-        </button>
+
+        {/* Previously used folders, icon-only (not the whole link) — a
+            quick way back to an earlier folder without retyping it. Each
+            one opens straight in Drive; the name/id shows on hover rather
+            than taking up a line of its own. */}
+        {history.length > 0 && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-slate-400">Previously used</span>
+            {history.map((h) => (
+              <a
+                key={h.folder_id}
+                href={FOLDER_URL + h.folder_id}
+                target="_blank"
+                rel="noreferrer"
+                title={h.folder_name || h.folder_id}
+                className="flex h-7 w-7 items-center justify-center rounded-lg
+                          border border-slate-200 bg-white text-slate-400
+                          hover:border-primary-300 hover:text-primary-600"
+              >
+                <Folder className="h-3.5 w-3.5" />
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -332,15 +358,25 @@ export default function SettingsPage() {
   //               Gmail, without disturbing the collection at all.
   const [exportId, setExportId] = useState('')
   const [importId, setImportId] = useState(null)
+  // Up to 3 folders each setting previously held, newest first — the
+  // "previously used" icons next to each folder's current link.
+  const [exportHistory, setExportHistory] = useState([])
+  const [importHistory, setImportHistory] = useState([])
+
+  // Re-read after every save too, not just on load: saving moves the folder
+  // that used to be current into "previously used", and the icon row has to
+  // pick that up without a page refresh.
+  const loadDriveSettings = () =>
+    getDriveFolderSettings().then((r) => {
+      setExportId(r.export_folder_id || r.folder_id || '')
+      setImportId(r.import_folder_id || null)
+      setExportHistory(r.export_history || [])
+      setImportHistory(r.import_history || [])
+    })
 
   useEffect(() => {
     if (!isManager) return
-    getDriveFolderSettings()
-      .then((r) => {
-        setExportId(r.export_folder_id || r.folder_id || '')
-        setImportId(r.import_folder_id || null)
-      })
-      .catch(() => {})
+    loadDriveSettings().catch(() => {})
     // Just for the collapsed Team section's badge. UsersPage re-reports the
     // count through onCount once it is opened, so this only has to be right
     // before anyone has expanded it.
@@ -358,6 +394,7 @@ export default function SettingsPage() {
       const res = await updateDriveFolderSettings(value)
       setExportId(res.export_folder_id || res.folder_id)
       toast.success('Export folder updated — the Apps Script now uses it too')
+      loadDriveSettings().catch(() => {})
     } catch (err) {
       toast.error(err.message || 'Could not update the export folder')
       throw err
@@ -372,6 +409,7 @@ export default function SettingsPage() {
       toast.success(res.import_folder_id === exportId
         ? 'Importing from the export folder'
         : `Now importing from "${res.folder_name}"`)
+      loadDriveSettings().catch(() => {})
     } catch (err) {
       toast.error(err.message || 'Could not update the import folder')
       throw err
@@ -383,6 +421,7 @@ export default function SettingsPage() {
       await updateDriveImportFolder('')
       setImportId(null)
       toast.success('Importing from the export folder again')
+      loadDriveSettings().catch(() => {})
     } catch (err) {
       toast.error(err.message || 'Could not update the import folder')
       throw err
@@ -494,6 +533,7 @@ export default function SettingsPage() {
             </p>
             <FolderField
               folderId={exportId}
+              history={exportHistory}
               placeholder={`${FOLDER_URL}1AbC...`}
               onSave={saveExport}
               emptyText="Not set — the Apps Script has nowhere to save to."
@@ -554,6 +594,7 @@ export default function SettingsPage() {
 
             <FolderField
               folderId={importId}
+              history={importHistory}
               placeholder={`${FOLDER_URL}1AbC...  (or the export folder's own link)`}
               onSave={saveImport}
               onClear={sameFolder ? null : followExport}
