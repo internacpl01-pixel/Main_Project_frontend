@@ -4,7 +4,7 @@ import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
   setAllTempRowsLock, resetExportStatus, prepareFarvisionExport, sendToLedger,
-  generateNarration,
+  generateNarration, generateNarrationBulk,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -160,6 +160,11 @@ export default function StagingPage() {
   // from the Farvision Verify page per the user, since Export Status is a
   // temp_trans field and this is the page that owns temp_trans rows.
   const [resettingExportStatus, setResettingExportStatus] = useState(false)
+  // Confirmation for the bulk "Generate Narration" button — it overwrites
+  // NARRATION on every row currently listed, with no per-row review, so it
+  // asks first the same way Clear All does.
+  const [narrationBulkOpen, setNarrationBulkOpen] = useState(false)
+  const [generatingNarrationBulk, setGeneratingNarrationBulk] = useState(false)
   const [preparingExport, setPreparingExport] = useState(false)
   const [sendingToLedger, setSendingToLedger] = useState(false)
   // Set only when Send to Ledger was refused for having unlocked rows --
@@ -314,6 +319,27 @@ export default function StagingPage() {
       toast.error(err.message || 'Could not reset Export Status')
     } finally {
       setResettingExportStatus(false)
+    }
+  }
+
+  const handleGenerateNarrationBulk = async () => {
+    setGeneratingNarrationBulk(true)
+    try {
+      const { matched, changed, skipped_locked: skippedLocked } =
+        await generateNarrationBulk(listParams())
+      setNarrationBulkOpen(false)
+      toast.success(
+        changed === 0
+          ? `Nothing to do — ${matched} row(s) matched, none writable` +
+            (skippedLocked ? ` (${skippedLocked} locked)` : '')
+          : `Narration generated for ${changed} of ${matched} row(s)` +
+            (skippedLocked ? ` — ${skippedLocked} locked row(s) skipped` : '')
+      )
+      load()
+    } catch (err) {
+      toast.error(err.message || 'Could not generate narration')
+    } finally {
+      setGeneratingNarrationBulk(false)
     }
   }
 
@@ -708,6 +734,19 @@ export default function StagingPage() {
             >
               <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
               Check Rules
+            </button>
+            <button
+              onClick={() => setNarrationBulkOpen(true)}
+              disabled={generatingNarrationBulk || !summary?.unposted}
+              title="Generate and save NARRATION for every row currently listed"
+              className="btn-secondary btn-sm"
+            >
+              {generatingNarrationBulk ? (
+                <Spinner size="sm" className="mr-1.5" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Generate Narration
             </button>
             <button
               onClick={handleResetExportStatus}
@@ -1390,6 +1429,23 @@ export default function StagingPage() {
         confirmText={clearing ? 'Clearing...' : 'Clear everything'}
         busy={clearing}
         danger
+      />
+
+      <ConfirmDialog
+        isOpen={narrationBulkOpen}
+        onClose={() => setNarrationBulkOpen(false)}
+        onConfirm={handleGenerateNarrationBulk}
+        title="Generate Narration"
+        message={
+          `Generate and save NARRATION for every row currently listed` +
+          (summary?.unposted ? ` (${summary.unposted} row(s))` : '') +
+          `, from each row's own Description, Reference, Credit/Debit, ` +
+          `Business Unit, Head, Type for RERA IDW, Apt# and ACC Remarks. ` +
+          `Locked rows are skipped. This overwrites any NARRATION already ` +
+          `on these rows, including anything typed by hand.`
+        }
+        confirmText={generatingNarrationBulk ? 'Generating...' : 'Generate for all listed'}
+        busy={generatingNarrationBulk}
       />
 
       <ConfirmDialog

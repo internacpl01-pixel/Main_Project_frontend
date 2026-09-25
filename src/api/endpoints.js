@@ -467,6 +467,16 @@ export async function generateNarration(rowId) {
   return data
 }
 
+// Generates AND saves NARRATION for every row the current Imported Rows
+// filters cover — unlike generateNarration above, this one writes directly,
+// since there is no per-row dialog to review hundreds of rows through.
+export async function generateNarrationBulk(params = {}) {
+  const { data } = await api.post('/transactions/temp-trans/generate-narration-bulk', null, {
+    params,
+  })
+  return data
+}
+
 // Lock or unlock one staged row. While locked, edit and delete on the row are
 // refused server-side (409), and Clear All refuses while anything is locked —
 // the padlock on screen is a real gate, not a display state.
@@ -645,6 +655,43 @@ export async function reorderConditions(accountType, direction, ids, target) {
 // which is the half worth checking before committing to an answer.
 export async function previewCondition(payload) {
   const { data } = await api.post('/rules/conditions/preview', payload)
+  return data
+}
+
+// Narration rules: same WHEN engine as conditions (account_type, direction,
+// tests), but the THEN is From/To text overriding the Internal Transfer
+// "(From X to Y)" leg in generated NARRATION, not a head. No `target` — a
+// narration rule never writes a head column.
+export async function fetchNarrationRules() {
+  const { data } = await api.get('/rules/narration-rules')
+  return data
+}
+
+// `payload` is {account_type, direction, tests, from_label, to_label, is_active}.
+export async function createNarrationRule(payload) {
+  const { data } = await api.post('/rules/narration-rules', payload)
+  return data
+}
+
+export async function updateNarrationRule(id, payload) {
+  const { data } = await api.put(`/rules/narration-rules/${id}`, payload)
+  return data
+}
+
+export async function deleteNarrationRule(id) {
+  const { data } = await api.delete(`/rules/narration-rules/${id}`)
+  return data
+}
+
+export async function reorderNarrationRules(accountType, direction, ids) {
+  const { data } = await api.post('/rules/narration-rules/reorder', {
+    account_type: accountType, direction, ids,
+  })
+  return data
+}
+
+export async function previewNarrationRule(payload) {
+  const { data } = await api.post('/rules/narration-rules/preview', payload)
   return data
 }
 

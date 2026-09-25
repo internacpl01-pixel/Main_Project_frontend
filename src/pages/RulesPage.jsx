@@ -4,6 +4,7 @@ import { fetchRuleMatrix, setRuleCell, createMasterEntry } from '../api/endpoint
 import { EmptyState, SearchInput, TableBusy, SkeletonRows, Spinner, Modal, Pagination } from '../components/UI.jsx'
 import { PageHeader } from '../components/PageHeader.jsx'
 import ConditionsPanel from '../components/ConditionsPanel.jsx'
+import NarrationRulesPanel from '../components/NarrationRulesPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import toast from 'react-hot-toast'
 import { RefreshCw, ShieldCheck, ScrollText, ArrowRight, Plus } from 'lucide-react'
@@ -60,6 +61,7 @@ export default function RulesPage() {
   // Kept here rather than in the panel so the tab can carry the count while the
   // panel is unmounted. Reported by the panel each time it loads.
   const [conditionCount, setConditionCount] = useState(0)
+  const [narrationRuleCount, setNarrationRuleCount] = useState(0)
 
   // Which head master is being edited. Left undefined on the first load so the
   // server picks its own default — the page should not have to know which of
@@ -351,6 +353,10 @@ export default function RulesPage() {
             key: 'conditions',
             label: `Conditions${conditionCount ? ` (${conditionCount})` : ''}`,
           },
+          {
+            key: 'narration-rules',
+            label: `Narration Rules${narrationRuleCount ? ` (${narrationRuleCount})` : ''}`,
+          },
         ].map((t) => (
           <button
             key={t.key}
@@ -372,6 +378,11 @@ export default function RulesPage() {
           target={current}
           targetLabel={targetLabel}
           onCountChange={setConditionCount}
+        />
+      ) : tab === 'narration-rules' ? (
+        <NarrationRulesPanel
+          canWrite={canWrite}
+          onCountChange={setNarrationRuleCount}
         />
       ) : (
       <>
