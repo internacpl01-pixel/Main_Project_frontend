@@ -25,6 +25,7 @@ const emptyDraft = (opts) => ({
   tests: [emptyTest()],
   from_label: '',
   to_label: '',
+  purpose_label: '',
   is_active: true,
 })
 
@@ -58,6 +59,7 @@ export default function NarrationRuleBuilder({
           })),
           from_label: editing.from_label || '',
           to_label: editing.to_label || '',
+          purpose_label: editing.purpose_label || '',
           is_active: editing.is_active,
         }
       : emptyDraft(options || {}))
@@ -109,7 +111,14 @@ export default function NarrationRuleBuilder({
       (arity < 1 || t.value1) && (arity < 2 || t.value2)
   })
   const testReady = Boolean(draft.account_type && draft.direction) && testsReady
-  const complete = testReady && draft.from_label.trim() && draft.to_label.trim()
+  const fromFilled = Boolean(draft.from_label.trim())
+  const toFilled = Boolean(draft.to_label.trim())
+  const purposeFilled = Boolean(draft.purpose_label.trim())
+  // From and To go together — filling only one is not printable — and at
+  // least one THEN (the leg pair, Purpose, or both) has to be given.
+  const legPairValid = fromFilled === toFilled
+  const hasAThen = (fromFilled && toFilled) || purposeFilled
+  const complete = testReady && legPairValid && hasAThen
 
   const cleanTests = () => draft.tests.map((t, i) => {
     const arity = arityFor(t.operator)
@@ -126,8 +135,9 @@ export default function NarrationRuleBuilder({
     account_type: draft.account_type,
     direction: draft.direction,
     tests: cleanTests(),
-    from_label: draft.from_label.trim(),
-    to_label: draft.to_label.trim(),
+    from_label: fromFilled ? draft.from_label.trim() : null,
+    to_label: toFilled ? draft.to_label.trim() : null,
+    purpose_label: purposeFilled ? draft.purpose_label.trim() : null,
     is_active: draft.is_active,
   })
 
@@ -166,10 +176,12 @@ export default function NarrationRuleBuilder({
     >
       <div className="space-y-4 text-sm">
         <p className="text-slate-500">
-          When a row matches this, the "(From ... to ...)" leg inside its
-          generated Internal Transfer narration uses the text below instead of
-          the guess pulled from the description. Nothing else in the
-          narration changes.
+          When a row matches this, its generated narration uses the text below
+          instead of the guess pulled from the description — the "(From ... to
+          ...)" leg on an Internal Transfer, the Purpose on a Receipt Credit
+          or Payment Disbursement, or both. A row is only ever in one of those
+          lines, so filling both is safe even though only one will ever be
+          used for a given row.
         </p>
 
         {/* WHEN */}
@@ -286,31 +298,59 @@ export default function NarrationRuleBuilder({
           </button>
         </div>
 
-        {/* THEN — two plain strings, not a head. */}
-        <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="w-14 font-medium text-slate-400">THEN</span>
-            <span className="text-slate-600">show "(From</span>
-            <input
-              className="input w-52 py-1"
-              value={draft.from_label}
-              placeholder="e.g. YES IDW 0490"
-              onChange={(e) => set({ from_label: e.target.value })}
-            />
-            <span className="text-slate-600">to</span>
-            <input
-              className="input w-52 py-1"
-              value={draft.to_label}
-              placeholder="e.g. ICICI Current A/C"
-              onChange={(e) => set({ to_label: e.target.value })}
-            />
-            <span className="text-slate-600">)"</span>
+        {/* THEN — plain strings, not a head. From/To go together; Purpose is
+            independent, and at least one of the two THENs is required. */}
+        <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-14 font-medium text-slate-400">THEN</span>
+              <span className="text-slate-600">show "(From</span>
+              <input
+                className="input w-52 py-1"
+                value={draft.from_label}
+                placeholder="e.g. YES IDW 0490"
+                onChange={(e) => set({ from_label: e.target.value })}
+              />
+              <span className="text-slate-600">to</span>
+              <input
+                className="input w-52 py-1"
+                value={draft.to_label}
+                placeholder="e.g. ICICI Current A/C"
+                onChange={(e) => set({ to_label: e.target.value })}
+              />
+              <span className="text-slate-600">)"</span>
+            </div>
+            <p className="pl-16 text-xs text-slate-400">
+              Used on an Internal Transfer row. Fill both or leave both blank
+              — CR and DR are separate rules, so write a second one if the
+              other direction needs its own wording.
+            </p>
           </div>
-          <p className="pl-16 text-xs text-slate-400">
-            Printed exactly as typed, in this order — CR and DR are separate
-            rules, so write a second one if the other direction needs its own
-            wording.
-          </p>
+
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-14 font-medium text-slate-400">AND</span>
+              <span className="text-slate-600">show Purpose "</span>
+              <input
+                className="input w-64 py-1"
+                value={draft.purpose_label}
+                placeholder="e.g. Contractor Advance"
+                onChange={(e) => set({ purpose_label: e.target.value })}
+              />
+              <span className="text-slate-600">"</span>
+            </div>
+            <p className="pl-16 text-xs text-slate-400">
+              Used on a Receipt Credit or Payment Disbursement row — never the
+              same row as From/To above, so filling both here is safe.
+            </p>
+          </div>
+
+          {!legPairValid && (
+            <p className="pl-16 text-xs text-amber-700">
+              From and To need to go together — fill both, or clear both and
+              use Purpose instead.
+            </p>
+          )}
         </div>
 
         {/* Try it */}

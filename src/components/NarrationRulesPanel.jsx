@@ -97,6 +97,7 @@ export default function NarrationRulesPanel({ canWrite, onCountChange }) {
           ({ subject_field, operator, value1, value2, combinator })),
         from_label: c.from_label,
         to_label: c.to_label,
+        purpose_label: c.purpose_label,
         is_active: !c.is_active,
       })
       await load()
