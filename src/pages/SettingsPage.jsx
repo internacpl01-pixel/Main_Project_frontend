@@ -594,7 +594,12 @@ export default function SettingsPage() {
 
             <FolderField
               folderId={importId}
-              history={importHistory}
+              // Following the export folder means there is no independent
+              // import history yet -- what it was "previously reading" is
+              // whatever the export folder's own history says. Once someone
+              // sets a genuinely different import folder, its own history
+              // takes over.
+              history={sameFolder ? exportHistory : importHistory}
               placeholder={`${FOLDER_URL}1AbC...  (or the export folder's own link)`}
               onSave={saveImport}
               onClear={sameFolder ? null : followExport}
