@@ -12,8 +12,14 @@ import { Plus, X, FlaskConical } from 'lucide-react'
 //
 // Same WHEN engine as ConditionBuilder — every dropdown filled from
 // GET /rules/narration-rules, nothing named here. The THEN half is the one
-// real difference: two free-text boxes instead of a head picker, because
-// this overrides a piece of generated text, not a head column.
+// real difference: From/To or Purpose instead of a head picker, because this
+// overrides a piece of generated text, not a head column.
+//
+// From/To and Purpose answer different rows — a row is only ever in the
+// Internal Transfer branch (From/To) or a Receipt Credit/Payment
+// Disbursement branch (Purpose), never both — so a rule sets exactly one,
+// never both at once. `thenKind` picks which; switching clears the other so
+// there is never a stale answer sitting in a field the rule does not use.
 
 const emptyTest = (combinator = null) => ({
   subject_field: '', operator: '', value1: '', value2: '', combinator,
@@ -23,6 +29,7 @@ const emptyDraft = (opts) => ({
   account_type: opts.account_types?.[0] || '',
   direction: opts.directions?.[0] || 'CR',
   tests: [emptyTest()],
+  thenKind: 'legs',
   from_label: '',
   to_label: '',
   purpose_label: '',
@@ -57,6 +64,7 @@ export default function NarrationRuleBuilder({
             value2: t.value2 ?? '',
             combinator: t.combinator,
           })),
+          thenKind: editing.purpose_label ? 'purpose' : 'legs',
           from_label: editing.from_label || '',
           to_label: editing.to_label || '',
           purpose_label: editing.purpose_label || '',
@@ -105,20 +113,24 @@ export default function NarrationRuleBuilder({
   const addTest = () => set({ tests: [...draft.tests, emptyTest('AND')] })
   const removeTest = (i) => set({ tests: draft.tests.filter((_, j) => j !== i) })
 
+  // Switching which THEN this rule sets clears the other — a rule answers
+  // From/To or Purpose, never both, so a value left behind in the hidden
+  // field would be saved as though it still meant something.
+  const setThenKind = (kind) => set({
+    thenKind: kind,
+    ...(kind === 'legs' ? { purpose_label: '' } : { from_label: '', to_label: '' }),
+  })
+
   const testsReady = draft.tests.length > 0 && draft.tests.every((t) => {
     const arity = arityFor(t.operator)
     return t.subject_field && t.operator &&
       (arity < 1 || t.value1) && (arity < 2 || t.value2)
   })
   const testReady = Boolean(draft.account_type && draft.direction) && testsReady
-  const fromFilled = Boolean(draft.from_label.trim())
-  const toFilled = Boolean(draft.to_label.trim())
-  const purposeFilled = Boolean(draft.purpose_label.trim())
-  // From and To go together — filling only one is not printable — and at
-  // least one THEN (the leg pair, Purpose, or both) has to be given.
-  const legPairValid = fromFilled === toFilled
-  const hasAThen = (fromFilled && toFilled) || purposeFilled
-  const complete = testReady && legPairValid && hasAThen
+  const thenReady = draft.thenKind === 'legs'
+    ? Boolean(draft.from_label.trim() && draft.to_label.trim())
+    : Boolean(draft.purpose_label.trim())
+  const complete = testReady && thenReady
 
   const cleanTests = () => draft.tests.map((t, i) => {
     const arity = arityFor(t.operator)
@@ -135,9 +147,9 @@ export default function NarrationRuleBuilder({
     account_type: draft.account_type,
     direction: draft.direction,
     tests: cleanTests(),
-    from_label: fromFilled ? draft.from_label.trim() : null,
-    to_label: toFilled ? draft.to_label.trim() : null,
-    purpose_label: purposeFilled ? draft.purpose_label.trim() : null,
+    from_label: draft.thenKind === 'legs' ? draft.from_label.trim() : null,
+    to_label: draft.thenKind === 'legs' ? draft.to_label.trim() : null,
+    purpose_label: draft.thenKind === 'purpose' ? draft.purpose_label.trim() : null,
     is_active: draft.is_active,
   })
 
@@ -177,11 +189,10 @@ export default function NarrationRuleBuilder({
       <div className="space-y-4 text-sm">
         <p className="text-slate-500">
           When a row matches this, its generated narration uses the text below
-          instead of the guess pulled from the description — the "(From ... to
-          ...)" leg on an Internal Transfer, the Purpose on a Receipt Credit
-          or Payment Disbursement, or both. A row is only ever in one of those
-          lines, so filling both is safe even though only one will ever be
-          used for a given row.
+          instead of the guess pulled from the description — either the
+          "(From ... to ...)" leg on an Internal Transfer row, or the Purpose
+          on a Receipt Credit or Payment Disbursement row. Pick which one this
+          rule answers below.
         </p>
 
         {/* WHEN */}
@@ -298,58 +309,72 @@ export default function NarrationRuleBuilder({
           </button>
         </div>
 
-        {/* THEN — plain strings, not a head. From/To go together; Purpose is
-            independent, and at least one of the two THENs is required. */}
-        <div className="rounded-lg border border-slate-200 p-4 space-y-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-14 font-medium text-slate-400">THEN</span>
-              <span className="text-slate-600">show "(From</span>
+        {/* THEN — From/To or Purpose, never both: a row is only ever in the
+            Internal Transfer branch or a Purpose branch, so a rule answers
+            one question, not two. */}
+        <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="w-14 font-medium text-slate-400">THEN</span>
+            <span className="text-slate-600">this rule sets</span>
+            <label className="flex items-center gap-1.5 text-slate-700">
               <input
-                className="input w-52 py-1"
-                value={draft.from_label}
-                placeholder="e.g. YES IDW 0490"
-                onChange={(e) => set({ from_label: e.target.value })}
+                type="radio"
+                checked={draft.thenKind === 'legs'}
+                onChange={() => setThenKind('legs')}
               />
-              <span className="text-slate-600">to</span>
+              From/To
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-700">
               <input
-                className="input w-52 py-1"
-                value={draft.to_label}
-                placeholder="e.g. ICICI Current A/C"
-                onChange={(e) => set({ to_label: e.target.value })}
+                type="radio"
+                checked={draft.thenKind === 'purpose'}
+                onChange={() => setThenKind('purpose')}
               />
-              <span className="text-slate-600">)"</span>
-            </div>
-            <p className="pl-16 text-xs text-slate-400">
-              Used on an Internal Transfer row. Fill both or leave both blank
-              — CR and DR are separate rules, so write a second one if the
-              other direction needs its own wording.
-            </p>
+              Purpose
+            </label>
           </div>
 
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-14 font-medium text-slate-400">AND</span>
-              <span className="text-slate-600">show Purpose "</span>
-              <input
-                className="input w-64 py-1"
-                value={draft.purpose_label}
-                placeholder="e.g. Contractor Advance"
-                onChange={(e) => set({ purpose_label: e.target.value })}
-              />
-              <span className="text-slate-600">"</span>
+          {draft.thenKind === 'legs' ? (
+            <div>
+              <div className="flex flex-wrap items-center gap-2 pl-16">
+                <span className="text-slate-600">show "(From</span>
+                <input
+                  className="input w-52 py-1"
+                  value={draft.from_label}
+                  placeholder="e.g. YES IDW 0490"
+                  onChange={(e) => set({ from_label: e.target.value })}
+                />
+                <span className="text-slate-600">to</span>
+                <input
+                  className="input w-52 py-1"
+                  value={draft.to_label}
+                  placeholder="e.g. ICICI Current A/C"
+                  onChange={(e) => set({ to_label: e.target.value })}
+                />
+                <span className="text-slate-600">)"</span>
+              </div>
+              <p className="pl-16 text-xs text-slate-400">
+                Used on an Internal Transfer row. CR and DR are separate
+                rules, so write a second one if the other direction needs its
+                own wording.
+              </p>
             </div>
-            <p className="pl-16 text-xs text-slate-400">
-              Used on a Receipt Credit or Payment Disbursement row — never the
-              same row as From/To above, so filling both here is safe.
-            </p>
-          </div>
-
-          {!legPairValid && (
-            <p className="pl-16 text-xs text-amber-700">
-              From and To need to go together — fill both, or clear both and
-              use Purpose instead.
-            </p>
+          ) : (
+            <div>
+              <div className="flex flex-wrap items-center gap-2 pl-16">
+                <span className="text-slate-600">show Purpose "</span>
+                <input
+                  className="input w-64 py-1"
+                  value={draft.purpose_label}
+                  placeholder="e.g. Contractor Advance"
+                  onChange={(e) => set({ purpose_label: e.target.value })}
+                />
+                <span className="text-slate-600">"</span>
+              </div>
+              <p className="pl-16 text-xs text-slate-400">
+                Used on a Receipt Credit or Payment Disbursement row.
+              </p>
+            </div>
           )}
         </div>
 
