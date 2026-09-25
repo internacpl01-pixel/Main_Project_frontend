@@ -4,6 +4,7 @@ import {
   fetchTempImport, fetchTempImportFilters, fetchProjects, fetchMasterData,
   updateTempRow, clearTempTrans, deleteTempRow, setTempRowLock,
   setAllTempRowsLock, resetExportStatus, prepareFarvisionExport, sendToLedger,
+  generateNarration,
 } from '../api/endpoints.js'
 import {
   Spinner, EmptyState, Modal, ConfirmDialog, SearchInput, Pagination,
@@ -105,6 +106,9 @@ export default function StagingPage() {
   // person edited between this dialog opening and being saved.
   const [initialForm, setInitialForm] = useState({})
   const [saving, setSaving] = useState(false)
+  // Busy state for the "Generate Narration" button — separate from `saving`,
+  // since generating only fills the textarea and never touches the database.
+  const [generatingNarration, setGeneratingNarration] = useState(false)
   // Which display column each editable field writes, from the company's own
   // fieldmap. The dialog is built from this rather than from names in this file.
   const [editable, setEditable] = useState({})
@@ -454,6 +458,23 @@ export default function StagingPage() {
     setTarget(row)
     setForm(next)
     setInitialForm(next)
+  }
+
+  // Fills the narration textarea from the row's own Description, Reference,
+  // Credit/Debit, Business Unit, Head, Type for RERA IDW, Apt# and ACC Remarks
+  // — nothing is saved here. The result sits in `form.narration` exactly like
+  // anything typed by hand, so it can still be edited and only Save Changes
+  // persists it.
+  const handleGenerateNarration = async () => {
+    setGeneratingNarration(true)
+    try {
+      const { narration: text } = await generateNarration(target.id)
+      setForm((f) => ({ ...f, narration: text }))
+    } catch (err) {
+      toast.error(err.message || 'Could not generate narration')
+    } finally {
+      setGeneratingNarration(false)
+    }
   }
 
   const handleSaveEdit = async () => {
@@ -1226,7 +1247,20 @@ export default function StagingPage() {
 
             {editable.narration ? (
               <div>
-                <label className="label">{editable.narration.label}</label>
+                <div className="flex items-center justify-between">
+                  <label className="label">{editable.narration.label}</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateNarration}
+                    disabled={generatingNarration}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-primary-600 hover:text-primary-700 disabled:text-slate-400"
+                  >
+                    {generatingNarration
+                      ? <Spinner size="sm" className="mr-0.5" />
+                      : <Sparkles className="h-3.5 w-3.5" />}
+                    {generatingNarration ? 'Generating...' : 'Generate Narration'}
+                  </button>
+                </div>
                 <textarea
                   value={form.narration ?? ''}
                   onChange={(e) => setForm({ ...form, narration: e.target.value })}

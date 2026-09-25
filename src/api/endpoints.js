@@ -457,6 +457,16 @@ export async function updateTempRow(rowId, payload) {
   return data
 }
 
+// Computes NARRATION text from the row's own Description, Reference,
+// Credit/Debit, Business Unit, Head, Type for RERA IDW, Apt# and ACC Remarks
+// — the same inputs the accountant's Excel formula reads. Does not save it;
+// the caller drops the result into the edit dialog's narration field so it
+// can still be reviewed or hand-edited before Save Changes persists it.
+export async function generateNarration(rowId) {
+  const { data } = await api.post(`/transactions/temp-trans/${rowId}/generate-narration`)
+  return data
+}
+
 // Lock or unlock one staged row. While locked, edit and delete on the row are
 // refused server-side (409), and Clear All refuses while anything is locked —
 // the padlock on screen is a real gate, not a display state.
