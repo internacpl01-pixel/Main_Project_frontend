@@ -819,9 +819,9 @@ export default function CompaniesPage() {
         </div>
       </Modal>
 
-      {/* Permanent delete. The server refuses any company holding data; this
-          asks it first, so the refusal is read before the decision rather
-          than after it. */}
+      {/* Permanent delete. Unconditional — the check endpoint only supplies
+          counts so this can show what is about to be lost before the name
+          has to be typed back. */}
       <Modal
         isOpen={!!deleting}
         onClose={() => setDeleting(null)}
@@ -829,32 +829,25 @@ export default function CompaniesPage() {
       >
         {!deleting || !deleting.check ? (
           <Spinner />
-        ) : !deleting.check.can_delete ? (
-          <div className="space-y-4">
-            <p className="text-sm text-slate-700">{deleting.check.reason}</p>
-            <p className="text-xs text-slate-500">
-              Deleting is for throwing away a company created by mistake. Anything
-              with a ledger gets deactivated instead — it disappears from the list
-              and nobody can sign in, but nothing is destroyed.
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <button onClick={() => setDeleting(null)} className="btn-secondary text-sm">Close</button>
-              <button
-                onClick={() => { setStatusConfirm(deleting.company); setDeleting(null) }}
-                className="btn-primary text-sm"
-              >
-                Deactivate instead
-              </button>
-            </div>
-          </div>
         ) : (
           <div className="space-y-4">
             <p className="text-sm text-slate-700">
               This drops the schema{' '}
               <span className="font-mono">{deleting.company.schema_name}</span>
               {deleting.check.users > 0 && <> and removes {deleting.check.users} account(s)</>}.
-              It holds no transactions, staged rows or imports.
             </p>
+            {/* Anything in the ledger tables — the thing the old block used to
+                refuse on — is exactly what would be silently lost, so it gets
+                called out here instead of blocking the action. */}
+            {deleting.check.blocking && Object.keys(deleting.check.blocking).length > 0 && (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                It holds{' '}
+                {Object.entries(deleting.check.blocking)
+                  .map(([k, v]) => `${v} ${k.replace('_', ' ')}`)
+                  .join(', ')}
+                . All of it goes with the schema.
+              </p>
+            )}
             {/* No ledger is not the same as nothing of value. A company can hold
                 a field setup someone spent an afternoon on and still have never
                 taken a statement — that is exactly the case the transaction
