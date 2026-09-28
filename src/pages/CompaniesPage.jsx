@@ -52,6 +52,11 @@ export default function CompaniesPage() {
   const [preview, setPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // A copy can take long enough that a toast fading off screen during the
+  // wait is easy to miss entirely -- this is the explicit, stays-open
+  // confirmation for the one action people specifically asked to see proof
+  // of. { ok: true, message } on success, { ok: false, message } on failure.
+  const [registerResult, setRegisterResult] = useState(null)
   const [renaming, setRenaming] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [statusConfirm, setStatusConfirm] = useState(null)
@@ -221,13 +226,16 @@ export default function CompaniesPage() {
         )
       }
       if (admin) parts.push(`admin '${admin.username}' created`)
-      toast.success(parts.join(' — '))
       setModalOpen(false)
       setForm(emptyForm)
       setPreview(null)
       load()
+      // A modal, not just the toast above and beyond it -- a copy can run long
+      // enough that a toast which already faded is exactly the "did it work?"
+      // moment this was asked for.
+      setRegisterResult({ ok: true, message: parts.join(' — ') })
     } catch (err) {
-      toast.error(err.message)
+      setRegisterResult({ ok: false, message: err.message })
     } finally {
       setSaving(false)
     }
@@ -709,6 +717,29 @@ export default function CompaniesPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Explicit result of the register/copy above. Stays open until
+          dismissed, unlike the toast, which can finish fading before someone
+          looks back at the screen after a copy that took a while. */}
+      <Modal
+        isOpen={!!registerResult}
+        onClose={() => setRegisterResult(null)}
+        title={registerResult?.ok ? 'Company created' : 'Company not created'}
+      >
+        <div className="space-y-4">
+          <p className={`text-sm ${registerResult?.ok ? 'text-slate-700' : 'text-red-700'}`}>
+            {registerResult?.message}
+          </p>
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={() => setRegisterResult(null)}
+              className={registerResult?.ok ? 'btn-primary text-sm' : 'btn-secondary text-sm'}
+            >
+              OK
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={!!renaming} onClose={() => setRenaming(null)} title="Rename Company">
