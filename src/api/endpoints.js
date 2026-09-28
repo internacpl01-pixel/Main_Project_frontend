@@ -77,7 +77,13 @@ export async function registerCompany(payload) {
   // and master data — never its transactions, imports or accounts.
   // Returns { company, admin, copied }. admin is null when no first admin was
   // seeded; copied is null for a blank company.
-  const { data } = await api.post('/companies/', payload)
+  //
+  // Copying a company with real master data (hundreds of beneficiary/head
+  // rows) is real DB work that can outrun the default 30s timeout -- the
+  // clone keeps running on the server and succeeds regardless, so a request
+  // that gives up early just shows a false failure. Same reasoning as the
+  // import endpoints' own IMPORT_TIMEOUT_MS.
+  const { data } = await api.post('/companies/', payload, { timeout: IMPORT_TIMEOUT_MS })
   return data
 }
 
